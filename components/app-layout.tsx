@@ -3,6 +3,7 @@ import { SidebarDocs } from "./sidebar-docs"
 import { ChatPanel } from "./chat-panel"
 import { ContextPanel } from "./context-panel"
 import { ThemeToggle } from "./theme-toggle"
+import { LogoutButton } from "./logout-button"
 
 interface AppLayoutProps {
   children?: React.ReactNode
@@ -15,12 +16,13 @@ export function AppLayout({ children }: AppLayoutProps) {
         <header className="w-full border-b border-border bg-transparent px-3 py-2">
           <div className="max-w-[1600px] mx-auto flex items-center justify-between gap-4">
             <div>
-              <h1 className="text-lg font-semibold">Wikipedia del Repositorio</h1>
-              <p className="text-xs text-muted-foreground">Documentación interactiva del proyecto</p>
+              <h1 className="text-lg font-semibold">ControlRepo</h1>
+              <p className="text-xs text-muted-foreground">Gestión de repositorios</p>
             </div>
             <div className="flex items-center gap-3 flex-shrink-0">
               <ContextPanel />
               <ThemeToggle />
+              <LogoutButton />
             </div>
           </div>
         </header>
