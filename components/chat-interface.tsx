@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import { ContextPanel } from "./context-panel"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -45,19 +44,15 @@ export function ChatInterface() {
   }
 
   return (
-    <Card className="h-full flex flex-col border-border">
-      <div className="border-b border-border p-4 flex items-start justify-between gap-4">
+    <Card className="h-full flex flex-col border-border py-0 gap-0">
+      <div className="border-b border-border px-3 py-2">
         <div>
           <h2 className="font-semibold text-foreground">Chat del Repositorio</h2>
           <p className="text-xs text-muted-foreground mt-1">Modo solo lectura - Consulta sobre el proyecto</p>
         </div>
-
-        <div className="ml-4">
-          <ContextPanel compact />
-        </div>
       </div>
 
-      <ScrollArea className="flex-1 p-4">
+      <ScrollArea className="flex-1 p-3">
         <div className="space-y-4">
           {messages.map((message, index) => (
             <div key={index} className={`flex gap-3 ${message.role === "user" ? "justify-end" : "justify-start"}`}>
@@ -87,7 +82,7 @@ export function ChatInterface() {
         </div>
       </ScrollArea>
 
-      <div className="border-t border-border p-4">
+      <div className="border-t border-border px-3 py-2">
         <form
           onSubmit={(e) => {
             e.preventDefault()

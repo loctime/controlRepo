@@ -45,13 +45,13 @@ export function ContextPanel({ compact }: { compact?: boolean }) {
 
       {open && (
         <div className="absolute right-0 top-full mt-2 w-[28rem] z-50">
-          <Card className="border-border">
-            <div className="p-3 border-b border-border">
+          <Card className="border-border py-0 gap-0">
+            <div className="px-3 py-2 border-b border-border">
               <h4 className="font-semibold">Archivos de Contexto</h4>
               <p className="text-xs text-muted-foreground mt-1">Archivos utilizados para la última respuesta</p>
             </div>
             <div className="max-h-[45vh]">
-              <ScrollArea className="p-4">
+              <ScrollArea className="p-3">
                 <div className="space-y-3">
                   {sampleFiles.map((file, index) => (
                     <div
