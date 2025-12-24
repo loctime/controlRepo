@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getRepositoryIndex } from "@/lib/repository/storage-filesystem"
 import { searchFiles } from "@/lib/repository/search"
 import { IndexedFile } from "@/lib/types/repository"
+import { getSystemPrompt, DEFAULT_ROLE, type AssistantRole } from "@/lib/prompts/system-prompts"
 
 /**
  * POST /api/chat
@@ -10,7 +11,13 @@ import { IndexedFile } from "@/lib/types/repository"
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { question, repositoryId } = body
+    const { question, repositoryId, role } = body
+    
+    // Determinar el rol del asistente (por defecto: architecture-explainer)
+    // TODO: Hacer configurable desde UI en el futuro
+    const assistantRole: AssistantRole = role && (role === "architecture-explainer" || role === "structure-auditor")
+      ? role
+      : DEFAULT_ROLE
 
     // Validar inputs
     if (!question || typeof question !== "string" || !question.trim()) {
@@ -107,25 +114,8 @@ export async function POST(request: NextRequest) {
 
     const contextText = contextParts.join("\n\n---\n\n")
 
-    // Construir prompt para phi-3
-    const prompt = `Eres un asistente técnico especializado en analizar código de repositorios. Tu tarea es responder preguntas basándote ÚNICAMENTE en la información del contexto proporcionado.
-
-INSTRUCCIONES CRÍTICAS:
-- Responde SOLO usando la información del contexto proporcionado
-- Si no hay información suficiente en el contexto para responder, indícalo explícitamente
-- NO inventes código ni detalles que no estén en el contexto
-- NO proporciones respuestas genéricas
-- Usa frases como "Según los archivos analizados..." o "Basándome en el contexto del repositorio..."
-- Sé técnico, conciso y preciso
-- Si el contexto menciona exports, funciones o hooks específicos, úsalos en tu respuesta
-
-CONTEXTO DEL REPOSITORIO:
-${contextText}
-
-PREGUNTA DEL USUARIO:
-${query}
-
-RESPUESTA:`
+    // Construir prompt usando el sistema de roles
+    const prompt = getSystemPrompt(assistantRole, contextText, query)
 
     // Llamar a Ollama local
     let ollamaResponse
@@ -174,6 +164,7 @@ RESPUESTA:`
       debug: {
         model: "phi3:mini",
         contextFiles: relevantFiles.length,
+        role: assistantRole,
       },
     })
   } catch (error) {
