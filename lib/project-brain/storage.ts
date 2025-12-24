@@ -29,6 +29,6 @@ export interface ProjectBrainStorage {
   deleteProjectBrain(repositoryId: string): Promise<void>
 }
 
-// Nota: La implementación filesystem se creará en storage-filesystem.ts
-// siguiendo el mismo patrón que RepositoryStorage
+// Exportar implementación filesystem por defecto
+export * from "./storage-filesystem"
 

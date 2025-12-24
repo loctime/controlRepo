@@ -3,6 +3,7 @@ import { getRepositoryIndex } from "@/lib/repository/storage-filesystem"
 import { searchFiles } from "@/lib/repository/search"
 import { IndexedFile } from "@/lib/types/repository"
 import { getSystemPrompt, DEFAULT_ROLE, type AssistantRole } from "@/lib/prompts/system-prompts"
+import { getProjectBrain } from "@/lib/project-brain/storage-filesystem"
 
 /**
  * Detecta si una pregunta es de intención social (saludos, confirmaciones, etc.)
@@ -407,6 +408,17 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Cargar Project Brain (obligatorio)
+    const projectBrain = await getProjectBrain(repositoryId)
+    if (!projectBrain) {
+      return NextResponse.json(
+        {
+          error: `El Project Brain del repositorio ${repositoryId} no existe. Por favor, re-indexa el repositorio para generarlo.`,
+        },
+        { status: 409 }
+      )
+    }
+
     // Buscar archivos relevantes usando searchFiles
     const query = question.trim()
     
@@ -495,8 +507,19 @@ export async function POST(request: NextRequest) {
 
     const contextText = contextParts.join("\n\n---\n\n")
 
+    // Convertir Project Brain a texto plano
+    const projectBrainText = `PROJECT BRAIN (Contexto del Repositorio):
+Repository ID: ${projectBrain.repositoryId}
+Created: ${projectBrain.createdAt}
+Technologies: ${projectBrain.context.technologies.join(", ") || "N/A"}
+Total Files: ${index.summary.totalFiles}
+
+`
+
     // Construir prompt usando el sistema de roles con memoria de conversación
-    const prompt = getSystemPrompt(assistantRole, contextText, query, conversationMemory || null)
+    // Inyectar Project Brain antes del contexto de archivos
+    const fullContext = projectBrainText + contextText
+    const prompt = getSystemPrompt(assistantRole, fullContext, query, conversationMemory || null)
 
     // Llamar a Ollama local
     let ollamaResponse

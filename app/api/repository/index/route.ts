@@ -3,6 +3,8 @@ import { indexRepository } from "@/lib/repository/indexer"
 import { saveRepositoryIndex, acquireIndexLock, releaseIndexLock, getRepositoryIndex } from "@/lib/repository/storage"
 import { IndexResponse, RepositoryIndex } from "@/lib/types/repository"
 import { getRepositoryMetadata, resolveRepositoryBranch } from "@/lib/github/client"
+import { generateMinimalProjectBrain } from "@/lib/project-brain/generator"
+import { saveProjectBrain, hasProjectBrain } from "@/lib/project-brain/storage-filesystem"
 
 /**
  * POST /api/repository/index
@@ -121,6 +123,15 @@ export async function POST(request: NextRequest) {
           updatedIndex.status = "completed"
           await saveRepositoryIndex(updatedIndex)
           console.log(`[INDEX] Indexing completed for ${repositoryId} (${updatedIndex.files.length} files)`)
+          
+          // Crear Project Brain solo si no existe
+          const brainExists = await hasProjectBrain(repositoryId)
+          if (!brainExists) {
+            const projectBrain = generateMinimalProjectBrain(updatedIndex)
+            await saveProjectBrain(projectBrain)
+            console.log(`[INDEX] Project Brain created for ${repositoryId}`)
+          }
+          
           // Liberar lock
           await releaseIndexLock(repositoryId)
         })
