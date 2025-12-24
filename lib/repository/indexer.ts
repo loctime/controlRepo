@@ -13,6 +13,7 @@ import { createIndexedFile } from "@/lib/repository/analyzer"
 import { RepositoryIndex, IndexedFile, FileCategory } from "@/lib/types/repository"
 import { processWithLimit } from "./concurrency"
 import { getRepositoryIndex } from "./storage"
+import { createRepositoryId } from "./utils"
 
 // Límites de seguridad
 const MAX_FILES = 10000
@@ -27,18 +28,56 @@ export async function indexRepository(
   repo: string,
   branch?: string
 ): Promise<RepositoryIndex> {
-  const repositoryId = `${owner}/${repo}`
+  // Resolver rama primero para crear repositoryId con branch
+  let resolvedBranch: { branch: string; lastCommit: string }
+  let existingIndex: RepositoryIndex | null
+
+  // Si se proporciona branch, buscar índice con ese branch
+  if (branch) {
+    const repositoryId = createRepositoryId(owner, repo, branch)
+    existingIndex = await getRepositoryIndex(repositoryId)
+    if (existingIndex) {
+      resolvedBranch = await resolveRepositoryBranch(owner, repo, branch)
+    } else {
+      // Si no existe, usar el branch proporcionado
+      resolvedBranch = await resolveRepositoryBranch(owner, repo, branch)
+    }
+  } else {
+    // Si no se proporciona branch, buscar cualquier índice existente del repo
+    // Por ahora, intentar con "main" y "master" como fallback
+    const possibleBranches = ["main", "master"]
+    existingIndex = null
+    for (const possibleBranch of possibleBranches) {
+      const repositoryId = createRepositoryId(owner, repo, possibleBranch)
+      existingIndex = await getRepositoryIndex(repositoryId)
+      if (existingIndex) {
+        resolvedBranch = await resolveRepositoryBranch(owner, repo, existingIndex.branch)
+        break
+      }
+    }
+    // Si no existe ningún índice, resolver con branch por defecto
+    if (!existingIndex) {
+      resolvedBranch = await resolveRepositoryBranch(owner, repo)
+    }
+  }
+
+  const actualBranch = resolvedBranch.branch
+  const lastCommit = resolvedBranch.lastCommit
+  const repositoryId = createRepositoryId(owner, repo, actualBranch)
 
   // Obtener índice existente (debe existir porque se crea antes de llamar esta función)
-  const existingIndex = await getRepositoryIndex(repositoryId)
+  if (!existingIndex) {
+    existingIndex = await getRepositoryIndex(repositoryId)
+  }
+
   if (!existingIndex) {
     throw new Error(`Índice inicial no encontrado para ${repositoryId}. Debe crearse antes de iniciar la indexación.`)
   }
 
-  // Resolver rama automáticamente (usar la misma rama del índice existente si no se proporciona)
-  const resolvedBranch = await resolveRepositoryBranch(owner, repo, branch || existingIndex.branch)
-  const actualBranch = resolvedBranch.branch
-  const lastCommit = resolvedBranch.lastCommit
+  // Actualizar repositoryId si cambió el branch
+  if (existingIndex.id !== repositoryId) {
+    existingIndex.id = repositoryId
+  }
 
   // Obtener metadatos del repositorio (pueden haber cambiado)
   const repoMetadata = await getRepositoryMetadata(owner, repo)

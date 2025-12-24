@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getRepositoryIndex, isIndexing } from "@/lib/repository/storage"
 import { RepositoryIndex } from "@/lib/types/repository"
+import { createRepositoryId } from "@/lib/repository/utils"
 
 /**
  * GET /api/repository/status
@@ -21,13 +22,35 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const repositoryId = `${owner}/${repo}`
+    // Usar la rama proporcionada o buscar cualquier índice del repo
+    let index: Awaited<ReturnType<typeof getRepositoryIndex>>
+    let repositoryId: string
+
+    if (branch) {
+      repositoryId = createRepositoryId(owner, repo, branch)
+      index = await getRepositoryIndex(repositoryId)
+    } else {
+      // Si no se proporciona branch, buscar cualquier índice existente del repo
+      // Por ahora, intentar con "main" y "master" como fallback
+      const possibleBranches = ["main", "master"]
+      index = null
+      for (const possibleBranch of possibleBranches) {
+        repositoryId = createRepositoryId(owner, repo, possibleBranch)
+        index = await getRepositoryIndex(repositoryId)
+        if (index) break
+      }
+      if (!index) {
+        repositoryId = createRepositoryId(owner, repo, "main") // Fallback
+      }
+    }
 
     // Verificar si está siendo indexado
     const indexing = await isIndexing(repositoryId)
 
-    // Obtener índice
-    const index = await getRepositoryIndex(repositoryId)
+    // Obtener índice si no lo tenemos
+    if (!index) {
+      index = await getRepositoryIndex(repositoryId)
+    }
 
     // Si no existe índice, devolver estado según si está indexando o no
     if (!index) {

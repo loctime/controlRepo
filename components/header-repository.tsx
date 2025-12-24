@@ -4,16 +4,20 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Plus, Loader2, CheckCircle2, AlertCircle, GitBranch } from "lucide-react"
+import { Plus, Loader2, CheckCircle2, AlertCircle, GitBranch, RefreshCw, AlertTriangle } from "lucide-react"
 import { useRepository } from "@/lib/repository-context"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { AddRepositoryInline } from "./add-repository-inline"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 
 export function HeaderRepository() {
   const { repositoryId, status, loading, currentIndex, reindexRepository } = useRepository()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [branches, setBranches] = useState<string[]>([])
   const [loadingBranches, setLoadingBranches] = useState(false)
+  const [hasUpdates, setHasUpdates] = useState(false)
+  const [checkingUpdates, setCheckingUpdates] = useState(false)
+  const [reindexing, setReindexing] = useState(false)
 
   // Obtener ramas disponibles cuando hay un índice completado
   useEffect(() => {
@@ -35,6 +39,49 @@ export function HeaderRepository() {
     }
   }, [currentIndex?.owner, currentIndex?.repo, status])
 
+  // Detección liviana de cambios: verificar si el commit SHA cambió
+  useEffect(() => {
+    if (!currentIndex || status !== "completed") {
+      setHasUpdates(false)
+      return
+    }
+
+    const checkForUpdates = async () => {
+      setCheckingUpdates(true)
+      try {
+        const response = await fetch(
+          `/api/repository/check-updates?owner=${encodeURIComponent(currentIndex.owner)}&repo=${encodeURIComponent(currentIndex.repo)}&branch=${encodeURIComponent(currentIndex.branch)}`
+        )
+        if (response.ok) {
+          const data = await response.json()
+          setHasUpdates(data.hasUpdates || false)
+        } else if (response.status === 502) {
+          // Error de GitHub API (rate limit, repo privado, etc.)
+          // No mostrar error, solo no actualizar el estado
+          console.warn("No se pudo verificar actualizaciones del repositorio")
+          setHasUpdates(false)
+        } else {
+          // Otro error, no actualizar estado
+          setHasUpdates(false)
+        }
+      } catch (err) {
+        console.error("Error al verificar actualizaciones:", err)
+        // No romper el flujo si falla la verificación
+        setHasUpdates(false)
+      } finally {
+        setCheckingUpdates(false)
+      }
+    }
+
+    // Verificar cambios solo cuando el índice está completado
+    checkForUpdates()
+
+    // Verificar cambios periódicamente (cada 30 segundos) - operación liviana
+    const intervalId = setInterval(checkForUpdates, 30000)
+
+    return () => clearInterval(intervalId)
+  }, [currentIndex, status])
+
   // Handler para cambiar de rama
   const handleBranchChange = async (newBranch: string) => {
     if (!currentIndex || newBranch === currentIndex.branch) return
@@ -43,6 +90,22 @@ export function HeaderRepository() {
       await reindexRepository(currentIndex.owner, currentIndex.repo, newBranch)
     } catch (error) {
       console.error("Error al cambiar de rama:", error)
+    }
+  }
+
+  // Handler para reindexar manualmente
+  const handleReindex = async () => {
+    if (!currentIndex || reindexing) return
+    
+    setReindexing(true)
+    try {
+      await reindexRepository(currentIndex.owner, currentIndex.repo, currentIndex.branch)
+      // Resetear el estado de actualizaciones después de reindexar
+      setHasUpdates(false)
+    } catch (error) {
+      console.error("Error al reindexar:", error)
+    } finally {
+      setReindexing(false)
     }
   }
 
@@ -123,8 +186,8 @@ export function HeaderRepository() {
 
   return (
     <div className="flex flex-col gap-2 flex-1 min-w-0">
-      {/* Fila principal: Repositorio + Estado + Botón */}
-      <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 min-w-0">
+      {/* Fila principal: Repositorio + Estado + Botones */}
+      <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-2 min-w-0">
         {/* Repositorio activo - Estilo GitHub/Vercel */}
         <div className="flex items-center gap-1.5 min-w-0">
           <GitBranch className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -145,6 +208,35 @@ export function HeaderRepository() {
           {getStatusBadge()}
         </div>
 
+        {/* Botón reindexar repositorio (solo visible cuando hay índice completado) */}
+        {status === "completed" && currentIndex && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon-sm"
+                variant="outline"
+                onClick={handleReindex}
+                disabled={loading || reindexing}
+                className={`shrink-0 h-6 w-6 border-border ${
+                  hasUpdates 
+                    ? "bg-amber-500/20 hover:bg-amber-500/30 border-amber-500/50" 
+                    : "bg-muted/30 hover:bg-muted/50"
+                }`}
+              >
+                {reindexing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className={`h-3.5 w-3.5 ${hasUpdates ? "text-amber-600 dark:text-amber-400" : ""}`} />
+                )}
+                <span className="sr-only">Reindexar repositorio</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{hasUpdates ? "Hay actualizaciones disponibles - Reindexar repositorio" : "Reindexar repositorio"}</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
+
         {/* Botón agregar/indexar repositorio */}
         <Tooltip>
           <TooltipTrigger asChild>
@@ -164,6 +256,16 @@ export function HeaderRepository() {
           </TooltipContent>
         </Tooltip>
       </div>
+
+      {/* Aviso de actualizaciones disponibles */}
+      {hasUpdates && status === "completed" && currentIndex && (
+        <Alert variant="default" className="py-2 px-3 border-amber-500/50 bg-amber-500/10">
+          <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+          <AlertDescription className="text-xs text-amber-800 dark:text-amber-200">
+            El repositorio tiene actualizaciones disponibles. Haz clic en el botón de reindexar para actualizar el índice.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Input inline colapsable para agregar repositorio */}
       <AddRepositoryInline isOpen={dialogOpen} onClose={() => setDialogOpen(false)} />

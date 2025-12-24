@@ -3,6 +3,7 @@ import { indexRepository } from "@/lib/repository/indexer"
 import { saveRepositoryIndex, acquireIndexLock, releaseIndexLock, getRepositoryIndex } from "@/lib/repository/storage"
 import { IndexResponse } from "@/lib/types/repository"
 import { resolveRepositoryBranch } from "@/lib/github/client"
+import { createRepositoryId } from "@/lib/repository/utils"
 
 /**
  * POST /api/repository/reindex
@@ -29,15 +30,55 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const repositoryId = `${owner}/${repo}`
+    // Resolver rama primero para crear repositoryId con branch
+    let resolvedBranch: { branch: string; lastCommit: string }
+    let existingIndex: Awaited<ReturnType<typeof getRepositoryIndex>>
 
-    // Verificar si existe un índice previo
-    const existingIndex = await getRepositoryIndex(repositoryId)
-    if (!existingIndex) {
+    try {
+      // Intentar obtener índice existente primero (puede ser con branch diferente)
+      // Si no se proporciona branch, buscar cualquier índice del repo
+      if (branch) {
+        const repositoryIdWithBranch = createRepositoryId(owner, repo, branch)
+        existingIndex = await getRepositoryIndex(repositoryIdWithBranch)
+      } else {
+        // Si no se proporciona branch, buscar el índice más reciente del repo
+        // Por ahora, intentar con "main" y "master" como fallback
+        const possibleBranches = ["main", "master"]
+        for (const possibleBranch of possibleBranches) {
+          const repositoryIdWithBranch = createRepositoryId(owner, repo, possibleBranch)
+          existingIndex = await getRepositoryIndex(repositoryIdWithBranch)
+          if (existingIndex) break
+        }
+      }
+
+      if (!existingIndex) {
+        return NextResponse.json(
+          { error: "No existe un índice previo. Usa /index en su lugar." },
+          { status: 404 }
+        )
+      }
+
+      // Resolver rama automáticamente (usar la del índice existente si no se proporciona)
+      resolvedBranch = await resolveRepositoryBranch(owner, repo, branch || existingIndex.branch)
+    } catch (error) {
       return NextResponse.json(
-        { error: "No existe un índice previo. Usa /index en su lugar." },
-        { status: 404 }
+        { error: `Error al resolver rama: ${error instanceof Error ? error.message : "Error desconocido"}` },
+        { status: 400 }
       )
+    }
+
+    const actualBranch = resolvedBranch.branch
+    const repositoryId = createRepositoryId(owner, repo, actualBranch)
+
+    // Si el branch cambió, necesitamos crear un nuevo índice o actualizar el existente
+    if (existingIndex.branch !== actualBranch) {
+      // Crear nuevo índice para la nueva rama
+      existingIndex = {
+        ...existingIndex,
+        id: repositoryId,
+        branch: actualBranch,
+        lastCommit: resolvedBranch.lastCommit,
+      }
     }
 
     // Intentar adquirir lock (forzar si está bloqueado y expiró)
@@ -54,9 +95,6 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      // Resolver rama automáticamente (usar la del índice existente si no se proporciona)
-      const resolvedBranch = await resolveRepositoryBranch(owner, repo, branch || existingIndex.branch)
-      const actualBranch = resolvedBranch.branch
 
       // Actualizar índice existente a status "indexing" antes de iniciar
       existingIndex.status = "indexing"

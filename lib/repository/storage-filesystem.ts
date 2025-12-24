@@ -12,6 +12,7 @@ import { RepositoryIndex, IndexLock } from "@/lib/types/repository"
 import { writeFile, readFile, mkdir, unlink, rename, stat } from "fs/promises"
 import { join } from "path"
 import { RepositoryStorage } from "./storage"
+import { normalizeRepositoryIdForFile } from "./utils"
 
 const STORAGE_DIR = join(process.cwd(), ".repository-indexes")
 const LOCK_DIR = join(process.cwd(), ".repository-locks")
@@ -36,7 +37,7 @@ class FilesystemRepositoryStorage implements RepositoryStorage {
    */
   async saveRepositoryIndex(index: RepositoryIndex): Promise<void> {
     await ensureDirs()
-    const fileName = `${index.id.replace("/", "_")}.json`
+    const fileName = `${normalizeRepositoryIdForFile(index.id)}.json`
     const finalPath = join(STORAGE_DIR, fileName)
     const tempPath = join(STORAGE_DIR, `${fileName}.tmp`)
 
@@ -63,7 +64,7 @@ class FilesystemRepositoryStorage implements RepositoryStorage {
    */
   async getRepositoryIndex(repositoryId: string): Promise<RepositoryIndex | null> {
     await ensureDirs()
-    const filePath = join(STORAGE_DIR, `${repositoryId.replace("/", "_")}.json`)
+    const filePath = join(STORAGE_DIR, `${normalizeRepositoryIdForFile(repositoryId)}.json`)
 
     try {
       const content = await readFile(filePath, "utf-8")
@@ -79,7 +80,7 @@ class FilesystemRepositoryStorage implements RepositoryStorage {
    */
   async acquireIndexLock(repositoryId: string, lockedBy: string = "system"): Promise<boolean> {
     await ensureDirs()
-    const lockPath = join(LOCK_DIR, `${repositoryId.replace("/", "_")}.json`)
+    const lockPath = join(LOCK_DIR, `${normalizeRepositoryIdForFile(repositoryId)}.json`)
 
     try {
       // Verificar si existe un lock activo
@@ -128,7 +129,7 @@ class FilesystemRepositoryStorage implements RepositoryStorage {
    */
   async releaseIndexLock(repositoryId: string): Promise<void> {
     await ensureDirs()
-    const lockPath = join(LOCK_DIR, `${repositoryId.replace("/", "_")}.json`)
+    const lockPath = join(LOCK_DIR, `${normalizeRepositoryIdForFile(repositoryId)}.json`)
     
     try {
       await unlink(lockPath)
@@ -147,7 +148,7 @@ class FilesystemRepositoryStorage implements RepositoryStorage {
    */
   async isIndexing(repositoryId: string): Promise<boolean> {
     await ensureDirs()
-    const lockPath = join(LOCK_DIR, `${repositoryId.replace("/", "_")}.json`)
+    const lockPath = join(LOCK_DIR, `${normalizeRepositoryIdForFile(repositoryId)}.json`)
 
     try {
       // Verificar si el archivo existe

@@ -5,6 +5,7 @@ import { IndexResponse, RepositoryIndex } from "@/lib/types/repository"
 import { getRepositoryMetadata, resolveRepositoryBranch } from "@/lib/github/client"
 import { generateMinimalProjectBrain } from "@/lib/project-brain/generator"
 import { saveProjectBrain, hasProjectBrain } from "@/lib/project-brain/storage-filesystem"
+import { createRepositoryId } from "@/lib/repository/utils"
 
 /**
  * POST /api/repository/index
@@ -31,7 +32,23 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const repositoryId = `${owner}/${repo}`
+    // Resolver rama primero para crear repositoryId con branch
+    let resolvedBranch: { branch: string; lastCommit: string }
+    let repoMetadata
+
+    try {
+      repoMetadata = await getRepositoryMetadata(owner, repo)
+      resolvedBranch = await resolveRepositoryBranch(owner, repo, branch)
+    } catch (error) {
+      console.error(`[INDEX] Error resolving branch for ${owner}/${repo}:`, error)
+      return NextResponse.json(
+        { error: `Error al resolver rama del repositorio: ${error instanceof Error ? error.message : "Error desconocido"}` },
+        { status: 400 }
+      )
+    }
+
+    const finalBranch = resolvedBranch.branch
+    const repositoryId = createRepositoryId(owner, repo, finalBranch)
 
     // Intentar adquirir lock
     const lockAcquired = await acquireIndexLock(repositoryId, "system")
@@ -47,19 +64,6 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      // Resolver rama automáticamente
-      let resolvedBranch: { branch: string; lastCommit: string }
-      let repoMetadata
-
-      try {
-        repoMetadata = await getRepositoryMetadata(owner, repo)
-        resolvedBranch = await resolveRepositoryBranch(owner, repo, branch)
-      } catch (error) {
-        console.error(`[INDEX] Error resolving branch for ${repositoryId}:`, error)
-        throw new Error(`Error al resolver rama del repositorio: ${error instanceof Error ? error.message : "Error desconocido"}`)
-      }
-
-      const finalBranch = resolvedBranch.branch
       const lastCommit = resolvedBranch.lastCommit
       const defaultBranch = repoMetadata.default_branch
 
