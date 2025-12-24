@@ -1,30 +1,37 @@
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore"
 import { db } from "./firebase"
 
-export async function bootstrapUserRoot(uid: string): Promise<void> {
+/**
+ * Inicializa el documento de usuario en /apps/auditoria/users/{uid}
+ * Solo crea metadata básica del usuario.
+ * 
+ * REGLA ARQUITECTÓNICA:
+ * - ControlAudit solo puede escribir en /apps/auditoria/**
+ * - NO inicializa carpetas (eso es responsabilidad de ControlFile API)
+ * - NO escribe en /apps/controlfile/**
+ * - Solo metadata básica del usuario
+ */
+export async function initializeUserDocument(uid: string, email: string | null = null): Promise<void> {
   if (typeof window === "undefined" || !db) return
 
-  const rootPath = `files/controlrepo/user/${uid}/root`
-  const rootRef = doc(db, rootPath)
+  // Namespace obligatorio: /apps/auditoria/users/{uid}
+  const userPath = `apps/auditoria/users/${uid}`
+  const userRef = doc(db, userPath)
 
   try {
-    const rootDoc = await getDoc(rootRef)
+    const userDoc = await getDoc(userRef)
 
-    if (!rootDoc.exists()) {
-      await setDoc(rootRef, {
-        id: "root",
-        type: "folder",
-        name: "ControlRepo",
-        parentId: null,
+    // Solo crear si no existe (idempotente)
+    if (!userDoc.exists()) {
+      await setDoc(userRef, {
+        email: email || null,
         createdAt: serverTimestamp(),
-        metadata: {
-          app: "controlrepo",
-          isRoot: true,
-        },
+        updatedAt: serverTimestamp(),
       })
     }
   } catch (error) {
-    throw error
+    // Tolerante a errores: no bloquea el login
+    console.error("Error al inicializar documento de usuario:", error)
   }
 }
 

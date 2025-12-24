@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react"
 import { User, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth"
 import { auth } from "./firebase"
-import { bootstrapUserRoot } from "./bootstrap"
+import { initializeUserDocument } from "./bootstrap"
 
 interface AuthContextType {
   user: User | null
@@ -28,7 +28,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         setUser(firebaseUser)
-        await bootstrapUserRoot(firebaseUser.uid)
+        // NO inicializar aquí - solo se inicializa en register()
+        // La inicialización de carpetas es responsabilidad de ControlFile API
       } else {
         setUser(null)
       }
@@ -45,7 +46,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const register = async (email: string, password: string) => {
     if (!auth) throw new Error("Firebase Auth no está inicializado")
-    await createUserWithEmailAndPassword(auth, email, password)
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password)
+    // Inicializar documento de usuario solo en /apps/auditoria/users/{uid}
+    // La inicialización de carpetas es responsabilidad exclusiva de ControlFile API
+    await initializeUserDocument(userCredential.user.uid, email)
   }
 
   const logout = async () => {
