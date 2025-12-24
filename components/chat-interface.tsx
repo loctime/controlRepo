@@ -16,6 +16,46 @@ interface Message {
   content: string
 }
 
+interface ConversationMemory {
+  previousIntents: string[]
+  usedSources: string[]
+  findings: {
+    improvements: string[]
+    risks: string[]
+  }
+}
+
+/**
+ * Detecta la intención de una pregunta basándose en palabras clave
+ */
+function detectIntent(question: string): string {
+  const lowerQuestion = question.toLowerCase()
+  
+  if (lowerQuestion.includes("dónde") || lowerQuestion.includes("ubicación") || lowerQuestion.includes("path")) {
+    return "LOCALIZACIÓN"
+  }
+  if (lowerQuestion.includes("qué hace") || lowerQuestion.includes("qué es") || lowerQuestion.includes("para qué")) {
+    return "FUNCIONALIDAD"
+  }
+  if (lowerQuestion.includes("cómo funciona") || lowerQuestion.includes("cómo se") || lowerQuestion.includes("flujo")) {
+    return "PROCESO/FLUJO"
+  }
+  if (lowerQuestion.includes("arquitectura") || lowerQuestion.includes("estructura") || lowerQuestion.includes("overview") || lowerQuestion.includes("organización")) {
+    return "VISTA MACRO"
+  }
+  if (lowerQuestion.includes("auditar") || lowerQuestion.includes("revisar") || lowerQuestion.includes("evaluar") || lowerQuestion.includes("buenas prácticas")) {
+    return "AUDITORÍA"
+  }
+  if (lowerQuestion.includes("por qué") || lowerQuestion.includes("razón") || lowerQuestion.includes("motivo")) {
+    return "JUSTIFICACIÓN"
+  }
+  if (lowerQuestion.includes("comparar") || lowerQuestion.includes("diferencias") || lowerQuestion.includes("similitudes") || lowerQuestion.includes(" vs ")) {
+    return "COMPARACIÓN"
+  }
+  
+  return "GENERAL"
+}
+
 export function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -26,6 +66,14 @@ export function ChatInterface() {
   ])
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
+  const [conversationMemory, setConversationMemory] = useState<ConversationMemory>({
+    previousIntents: [],
+    usedSources: [],
+    findings: {
+      improvements: [],
+      risks: [],
+    },
+  })
   const { repositoryId } = useRepository()
   const { setContextFiles } = useContextFiles()
 
@@ -33,6 +81,8 @@ export function ChatInterface() {
     if (!input.trim()) return
 
     const userMessage = input.trim()
+    const intent = detectIntent(userMessage)
+    
     setMessages([...messages, { role: "user", content: userMessage }])
     setInput("")
     setLoading(true)
@@ -51,7 +101,7 @@ export function ChatInterface() {
         return
       }
 
-      // Consultar el endpoint de chat con Ollama
+      // Consultar el endpoint de chat con Ollama (incluyendo memoria de conversación)
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
@@ -60,6 +110,7 @@ export function ChatInterface() {
         body: JSON.stringify({
           question: userMessage,
           repositoryId,
+          conversationMemory: conversationMemory,
         }),
       })
 
@@ -77,17 +128,43 @@ export function ChatInterface() {
         ])
       } else {
         // Respuesta exitosa con respuesta generada por Ollama
-        const fileCount = data.files?.length || 0
+        // Guardar archivos declarados explícitamente en la respuesta
+        const declaredFiles = data.files && Array.isArray(data.files) && data.files.length > 0
+          ? data.files.map((file: { name: string; path: string }) => ({
+              name: file.name,
+              path: file.path,
+            }))
+          : []
         
-        // Guardar archivos en el contexto compartido
-        if (data.files && Array.isArray(data.files)) {
-          setContextFiles(data.files.map((file: { name: string; path: string }) => ({
-            name: file.name,
-            path: file.path,
-          })))
-        } else {
-          setContextFiles([])
-        }
+        setContextFiles(declaredFiles)
+        
+        // Actualizar memoria de conversación
+        setConversationMemory((prev) => {
+          const newMemory: ConversationMemory = {
+            previousIntents: [...prev.previousIntents, intent].slice(-10), // Mantener últimas 10 intenciones
+            usedSources: [
+              ...prev.usedSources,
+              ...declaredFiles.map((f: { path: string }) => f.path),
+            ]
+              .filter((path, index, self) => self.indexOf(path) === index) // Eliminar duplicados
+              .slice(-20), // Mantener últimas 20 fuentes
+            findings: {
+              improvements: [
+                ...prev.findings.improvements,
+                ...(data.findings?.improvements || []),
+              ]
+                .filter((item, index, self) => self.indexOf(item) === index) // Eliminar duplicados
+                .slice(-10), // Mantener últimas 10 mejoras
+              risks: [
+                ...prev.findings.risks,
+                ...(data.findings?.risks || []),
+              ]
+                .filter((item, index, self) => self.indexOf(item) === index) // Eliminar duplicados
+                .slice(-10), // Mantener últimos 10 riesgos
+            },
+          }
+          return newMemory
+        })
         
         // Mostrar la respuesta generada por el modelo
         setMessages((prev) => [

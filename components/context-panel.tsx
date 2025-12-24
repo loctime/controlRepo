@@ -49,14 +49,15 @@ export function ContextPanel({ compact }: { compact?: boolean }) {
         <div className="absolute right-0 top-full mt-2 w-[28rem] z-50">
           <Card className="border-border py-0 gap-0">
             <div className="px-3 py-2 border-b border-border">
-              <h4 className="font-semibold">Archivos de Contexto</h4>
-              <p className="text-xs text-muted-foreground mt-1">Archivos utilizados para la última respuesta</p>
+              <h4 className="font-semibold">Fuentes Declaradas</h4>
+              <p className="text-xs text-muted-foreground mt-1">Archivos explícitamente mencionados en la respuesta</p>
             </div>
             <div className="max-h-[45vh]">
               <ScrollArea className="p-3">
                 {contextFiles.length === 0 ? (
                   <div className="py-8 text-center">
-                    <p className="text-sm text-muted-foreground">No hay archivos de contexto</p>
+                    <p className="text-sm text-muted-foreground mb-2">No se declararon fuentes explícitas</p>
+                    <p className="text-xs text-muted-foreground">La respuesta no puede justificar sus fuentes</p>
                   </div>
                 ) : (
                   <div className="space-y-3">

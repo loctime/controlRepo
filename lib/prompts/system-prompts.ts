@@ -145,6 +145,9 @@ ${GENERAL_RULES}
 
 ${INTENT_DETECTION}
 
+MEMORIA DE CONVERSACIÓN:
+{memory}
+
 CONTEXTO DEL REPOSITORIO:
 {context}
 
@@ -187,6 +190,9 @@ ${GENERAL_RULES}
 
 ${INTENT_DETECTION}
 
+MEMORIA DE CONVERSACIÓN:
+{memory}
+
 CONTEXTO DEL REPOSITORIO:
 {context}
 
@@ -196,14 +202,62 @@ PREGUNTA DEL USUARIO:
 RESPUESTA (detectar intención y usar formato correspondiente):`
 
 /**
+ * Formatea la memoria de conversación para incluirla en el prompt
+ */
+function formatConversationMemory(memory: {
+  previousIntents?: string[]
+  usedSources?: string[]
+  findings?: { improvements: string[]; risks: string[] }
+} | null | undefined): string {
+  if (!memory || (!memory.previousIntents?.length && !memory.usedSources?.length && !memory.findings)) {
+    return "Esta es la primera pregunta de la conversación. No hay memoria previa."
+  }
+
+  const parts: string[] = []
+  
+  if (memory.previousIntents && memory.previousIntents.length > 0) {
+    parts.push(`Intenciones previas: ${memory.previousIntents.join(", ")}`)
+  }
+  
+  if (memory.usedSources && memory.usedSources.length > 0) {
+    parts.push(`Fuentes ya consultadas: ${memory.usedSources.slice(0, 10).join(", ")}${memory.usedSources.length > 10 ? "..." : ""}`)
+  }
+  
+  if (memory.findings) {
+    if (memory.findings.improvements.length > 0) {
+      parts.push(`Mejoras ya mencionadas: ${memory.findings.improvements.slice(0, 3).join("; ")}${memory.findings.improvements.length > 3 ? "..." : ""}`)
+    }
+    if (memory.findings.risks.length > 0) {
+      parts.push(`Riesgos ya mencionados: ${memory.findings.risks.slice(0, 3).join("; ")}${memory.findings.risks.length > 3 ? "..." : ""}`)
+    }
+  }
+  
+  return parts.length > 0 
+    ? parts.join("\n") + "\n\nIMPORTANTE: No repitas mejoras, riesgos o explicaciones ya dadas. Si el usuario insiste sobre lo mismo, resumí brevemente y referenciá la respuesta anterior. Si algo ya fue auditado, indicálo explícitamente."
+    : "Esta es la primera pregunta de la conversación."
+}
+
+/**
  * Obtiene el prompt de sistema para un rol dado
  */
-export function getSystemPrompt(role: AssistantRole, context: string, question: string): string {
+export function getSystemPrompt(
+  role: AssistantRole, 
+  context: string, 
+  question: string, 
+  memory?: {
+    previousIntents?: string[]
+    usedSources?: string[]
+    findings?: { improvements: string[]; risks: string[] }
+  } | null
+): string {
   const basePrompt = role === "architecture-explainer" 
     ? ARCHITECTURE_EXPLAINER_PROMPT 
     : STRUCTURE_AUDITOR_PROMPT
   
+  const memoryText = formatConversationMemory(memory)
+  
   return basePrompt
+    .replace("{memory}", memoryText)
     .replace("{context}", context)
     .replace("{question}", question)
 }

@@ -5,13 +5,128 @@ import { IndexedFile } from "@/lib/types/repository"
 import { getSystemPrompt, DEFAULT_ROLE, type AssistantRole } from "@/lib/prompts/system-prompts"
 
 /**
+ * Extrae las fuentes (archivos/rutas) declaradas explícitamente en la respuesta del asistente
+ * Busca el bloque "Fuentes (archivos/rutas):" y parsea las rutas mencionadas
+ */
+function extractSourcesFromAnswer(answer: string): string[] {
+  // Buscar el bloque "Fuentes (archivos/rutas):" o variantes
+  const sourcesPattern = /Fuentes\s*\([^)]*\)\s*:?\s*\n?/i
+  const match = answer.match(sourcesPattern)
+  
+  if (!match) {
+    return []
+  }
+
+  // Encontrar el índice donde comienza el bloque de fuentes
+  const sourcesStartIndex = match.index! + match[0].length
+  const restOfAnswer = answer.substring(sourcesStartIndex)
+  
+  // Buscar dónde termina el bloque de fuentes (siguiente sección o fin de texto)
+  const nextSectionPattern = /(?:Respuesta|Mejoras|Riesgos|Falta contexto|Ubicación|$)/i
+  const nextSectionMatch = restOfAnswer.match(nextSectionPattern)
+  const sourcesEndIndex = nextSectionMatch ? nextSectionMatch.index! : restOfAnswer.length
+  
+  // Extraer el bloque de fuentes
+  const sourcesBlock = restOfAnswer.substring(0, sourcesEndIndex).trim()
+  
+  if (!sourcesBlock) {
+    return []
+  }
+
+  // Parsear rutas/archivos del bloque
+  // Buscar rutas que parezcan archivos (contienen / o terminan en extensiones comunes)
+  const pathPattern = /([a-zA-Z0-9_\-./]+\.(ts|tsx|js|jsx|md|json|mjs|css|scss|py|java|go|rs|rb|php|yml|yaml)|[a-zA-Z0-9_\-./]+\/[a-zA-Z0-9_\-./]+)/g
+  const paths: string[] = []
+  let pathMatch
+  
+  while ((pathMatch = pathPattern.exec(sourcesBlock)) !== null) {
+    const path = pathMatch[1].trim()
+    // Filtrar rutas que parezcan válidas (no solo palabras sueltas)
+    if (path.includes('/') || path.match(/\.(ts|tsx|js|jsx|md|json|mjs|css|scss|py|java|go|rs|rb|php|yml|yaml)$/)) {
+      paths.push(path)
+    }
+  }
+
+  // También buscar rutas mencionadas en formato de lista (líneas que empiezan con - o *)
+  const listPattern = /^[\s\-*]+([^\n]+)$/gm
+  let listMatch
+  while ((listMatch = listPattern.exec(sourcesBlock)) !== null) {
+    const item = listMatch[1].trim()
+    // Si el item parece una ruta, agregarlo
+    if (item.includes('/') || item.match(/\.(ts|tsx|js|jsx|md|json|mjs|css|scss|py|java|go|rs|rb|php|yml|yaml)$/)) {
+      // Limpiar el item (remover descripciones adicionales después de comas o espacios múltiples)
+      const cleanPath = item.split(/[,;]\s*/)[0].trim().split(/\s+/)[0].trim()
+      if (cleanPath && !paths.includes(cleanPath)) {
+        paths.push(cleanPath)
+      }
+    }
+  }
+
+  // Buscar rutas mencionadas en formato natural dentro del bloque (ej: "docs/architecture.md", "app/api/chat/route.ts")
+  const naturalPathPattern = /\b([a-zA-Z0-9_\-./]+(?:\.(?:ts|tsx|js|jsx|md|json|mjs|css|scss|py|java|go|rs|rb|php|yml|yaml))?)\b/g
+  let naturalMatch
+  while ((naturalMatch = naturalPathPattern.exec(sourcesBlock)) !== null) {
+    const potentialPath = naturalMatch[1].trim()
+    // Solo agregar si parece una ruta válida (contiene / o tiene extensión)
+    if ((potentialPath.includes('/') || potentialPath.match(/\.(ts|tsx|js|jsx|md|json|mjs|css|scss|py|java|go|rs|rb|php|yml|yaml)$/)) 
+        && potentialPath.length > 3 // Filtrar palabras muy cortas
+        && !paths.includes(potentialPath)) {
+      paths.push(potentialPath)
+    }
+  }
+
+  return [...new Set(paths)] // Eliminar duplicados
+}
+
+/**
+ * Extrae hallazgos clave (mejoras y riesgos) mencionados en la respuesta del asistente
+ */
+function extractFindingsFromAnswer(answer: string): { improvements: string[]; risks: string[] } {
+  const improvements: string[] = []
+  const risks: string[] = []
+  
+  // Buscar bloque "Mejoras / Riesgos"
+  const findingsPattern = /Mejoras\s*\/\s*Riesgos\s*\([^)]*\)\s*:?\s*\n?/i
+  const match = answer.match(findingsPattern)
+  
+  if (match) {
+    const findingsStartIndex = match.index! + match[0].length
+    const restOfAnswer = answer.substring(findingsStartIndex)
+    
+    // Buscar dónde termina el bloque (siguiente sección)
+    const nextSectionPattern = /(?:Falta contexto|Respuesta|$)/i
+    const nextSectionMatch = restOfAnswer.match(nextSectionPattern)
+    const findingsEndIndex = nextSectionMatch ? nextSectionMatch.index! : restOfAnswer.length
+    
+    const findingsBlock = restOfAnswer.substring(0, findingsEndIndex).trim()
+    
+    // Buscar mejoras y riesgos mencionados
+    const improvementKeywords = /(?:mejorar|mejora|sugerir|recomendar|optimizar|refactorizar|extraer|separar)/i
+    const riskKeywords = /(?:riesgo|problema|acoplamiento|deuda técnica|mantenibilidad|escalabilidad|fragilidad)/i
+    
+    // Dividir por líneas y categorizar
+    const lines = findingsBlock.split('\n').map(l => l.trim()).filter(l => l.length > 0)
+    lines.forEach(line => {
+      if (improvementKeywords.test(line)) {
+        improvements.push(line.substring(0, 100)) // Limitar longitud
+      }
+      if (riskKeywords.test(line)) {
+        risks.push(line.substring(0, 100)) // Limitar longitud
+      }
+    })
+  }
+  
+  return { improvements, risks }
+}
+
+/**
  * POST /api/chat
  * Genera una respuesta usando Ollama (phi-3) basada en archivos relevantes del repositorio
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { question, repositoryId, role } = body
+    const { question, repositoryId, role, conversationMemory } = body
     
     // Determinar el rol del asistente (por defecto: architecture-explainer)
     // TODO: Hacer configurable desde UI en el futuro
@@ -114,8 +229,8 @@ export async function POST(request: NextRequest) {
 
     const contextText = contextParts.join("\n\n---\n\n")
 
-    // Construir prompt usando el sistema de roles
-    const prompt = getSystemPrompt(assistantRole, contextText, query)
+    // Construir prompt usando el sistema de roles con memoria de conversación
+    const prompt = getSystemPrompt(assistantRole, contextText, query, conversationMemory || null)
 
     // Llamar a Ollama local
     let ollamaResponse
@@ -151,19 +266,81 @@ export async function POST(request: NextRequest) {
 
     // Extraer respuesta del modelo
     const answer = ollamaResponse.response || ollamaResponse.text || "No se pudo generar una respuesta."
+    const trimmedAnswer = answer.trim()
 
-    // Formatear archivos para la respuesta
-    const files = relevantFiles.map((file: IndexedFile) => ({
-      path: file.path,
-      name: file.name,
-    }))
+    // Extraer fuentes explícitas declaradas en la respuesta
+    const declaredSources = extractSourcesFromAnswer(trimmedAnswer)
+    
+    // Extraer hallazgos clave (mejoras y riesgos) de la respuesta
+    const findings = extractFindingsFromAnswer(trimmedAnswer)
+
+    // Mapear las fuentes declaradas a archivos del índice (si existen)
+    const declaredFiles: Array<{ path: string; name: string }> = []
+    const processedPaths = new Set<string>() // Evitar duplicados
+    
+    if (declaredSources.length > 0) {
+      // Buscar coincidencias exactas o parciales en el índice
+      declaredSources.forEach((sourcePath) => {
+        if (processedPaths.has(sourcePath)) {
+          return // Ya procesado
+        }
+        
+        // Normalizar la ruta (remover espacios, normalizar separadores)
+        const normalizedPath = sourcePath.trim().replace(/\\/g, '/')
+        const fileName = normalizedPath.split('/').pop() || normalizedPath
+        
+        // Buscar archivo en el índice con orden de prioridad:
+        // 1. Coincidencia exacta
+        // 2. Termina con la ruta
+        // 3. Contiene la ruta
+        // 4. Nombre de archivo coincide
+        let matchingFile: IndexedFile | undefined = undefined
+        
+        matchingFile = index.files.find((file: IndexedFile) => file.path === normalizedPath)
+        if (!matchingFile) {
+          matchingFile = index.files.find((file: IndexedFile) => file.path.endsWith(normalizedPath))
+        }
+        if (!matchingFile) {
+          matchingFile = index.files.find((file: IndexedFile) => file.path.includes(normalizedPath))
+        }
+        if (!matchingFile) {
+          matchingFile = index.files.find((file: IndexedFile) => file.name === fileName)
+        }
+        
+        if (matchingFile) {
+          // Evitar duplicados por path completo
+          if (!processedPaths.has(matchingFile.path)) {
+            declaredFiles.push({
+              path: matchingFile.path,
+              name: matchingFile.name,
+            })
+            processedPaths.add(matchingFile.path)
+            processedPaths.add(sourcePath)
+          }
+        } else {
+          // Si no se encuentra en el índice, agregar la ruta tal como fue declarada
+          // Esto permite mostrar fuentes que el asistente menciona aunque no estén indexadas
+          declaredFiles.push({
+            path: normalizedPath,
+            name: fileName,
+          })
+          processedPaths.add(sourcePath)
+        }
+      })
+    }
 
     return NextResponse.json({
-      answer: answer.trim(),
-      files,
+      answer: trimmedAnswer,
+      files: declaredFiles.length > 0 ? declaredFiles : [],
+      sourcesDeclared: declaredSources.length > 0,
+      findings: {
+        improvements: findings.improvements,
+        risks: findings.risks,
+      },
       debug: {
         model: "phi3:mini",
         contextFiles: relevantFiles.length,
+        declaredSources: declaredSources.length,
         role: assistantRole,
       },
     })
