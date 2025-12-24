@@ -4,6 +4,7 @@ import { Geist, Geist_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 import { ThemeProvider } from "@/components/theme-provider"
 import { AuthProvider } from "@/lib/auth-context"
+import { RepositoryProvider } from "@/lib/repository-context"
 import { AuthWrapper } from "@/components/auth-wrapper"
 import "./globals.css"
 
@@ -43,7 +44,9 @@ export default function RootLayout({
       <body className={`font-sans antialiased`}>
         <ThemeProvider defaultTheme="system" storageKey="repo-wiki-theme">
           <AuthProvider>
-            <AuthWrapper>{children}</AuthWrapper>
+            <RepositoryProvider>
+              <AuthWrapper>{children}</AuthWrapper>
+            </RepositoryProvider>
           </AuthProvider>
         </ThemeProvider>
         <Analytics />
