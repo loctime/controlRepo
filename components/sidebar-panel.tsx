@@ -58,9 +58,10 @@ export function SidebarPanel() {
     : []
 
   return (
-    <Card className="h-full border-border py-0 gap-0">
-      <Tabs defaultValue="architecture" className="h-full flex flex-col">
-        <div className="border-b border-border px-3 pt-2 pb-2">
+    <Card className="h-full border-border py-0 gap-0 flex flex-col overflow-hidden">
+      <Tabs defaultValue="architecture" className="h-full flex flex-col min-h-0">
+        {/* Header fijo de tabs - NO scrollable */}
+        <div className="border-b border-border px-3 pt-2 pb-2 shrink-0">
           <TabsList className="w-full grid grid-cols-3 gap-2">
             <TabsTrigger value="architecture" className="flex items-center gap-2">
               <FileText className="h-4 w-4" />
@@ -77,7 +78,8 @@ export function SidebarPanel() {
           </TabsList>
         </div>
 
-        <ScrollArea className="flex-1 p-3">
+        {/* Contenido scrollable - solo el cuerpo */}
+        <ScrollArea className="flex-1 min-h-0 p-3">
           <TabsContent value="architecture" className="mt-0">
             <div className="space-y-4">
               {hasIndex ? (
