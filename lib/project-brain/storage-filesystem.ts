@@ -21,6 +21,15 @@ async function ensureDirs() {
 }
 
 /**
+ * Normaliza un repositoryId para uso seguro en filesystem
+ * Reemplaza caracteres no seguros con guiones bajos
+ */
+function normalizeRepositoryId(repositoryId: string): string {
+  // Reemplazar slashes y otros caracteres no seguros con guiones bajos
+  return repositoryId.replace(/[^a-zA-Z0-9._-]/g, "_")
+}
+
+/**
  * Implementación filesystem-based de ProjectBrainStorage
  */
 class FilesystemProjectBrainStorage implements ProjectBrainStorage {
@@ -28,7 +37,7 @@ class FilesystemProjectBrainStorage implements ProjectBrainStorage {
    * Obtiene la ruta del directorio del Project Brain para un repositorio
    */
   private getBrainDir(repositoryId: string): string {
-    const normalizedId = repositoryId.replace("/", "_")
+    const normalizedId = normalizeRepositoryId(repositoryId)
     return join(STORAGE_DIR, normalizedId)
   }
 

@@ -13,59 +13,11 @@ export interface ProjectBrain {
   // Timestamps
   createdAt: string // ISO 8601
   updatedAt: string // ISO 8601
-  lastAnalyzedAt?: string // ISO 8601 - última vez que se analizó el repositorio
   
-  // Arquitectura del proyecto
-  architecture: {
-    // Descripción general de la arquitectura
-    overview?: string
-    
-    // Patrones identificados
-    patterns: ArchitecturePattern[]
-    
-    // Decisiones de diseño documentadas
-    decisions: DesignDecision[]
-    
-    // Capas del sistema identificadas
-    layers?: SystemLayer[]
-  }
-  
-  // Insights acumulados
-  insights: {
-    // Insights sobre estructura
-    structure: Insight[]
-    
-    // Insights sobre código
-    code: Insight[]
-    
-    // Insights sobre dependencias
-    dependencies: Insight[]
-    
-    // Insights sobre organización
-    organization: Insight[]
-  }
-  
-  // Contexto global del proyecto
-  context: {
-    // Propósito del proyecto
-    purpose?: string
-    
-    // Tecnologías principales
-    technologies: string[]
-    
-    // Convenciones identificadas
-    conventions: Convention[]
-    
-    // Áreas de atención (áreas que requieren cuidado especial)
-    areasOfConcern: string[]
-  }
-  
-  // Estadísticas de análisis
-  stats: {
-    totalInsights: number
-    totalDecisions: number
-    totalPatterns: number
-    lastAnalysisDuration?: number // en milisegundos
+  // Summary básico
+  summary: {
+    totalFiles: number
+    mainLanguages?: string[] // Lenguajes principales (top 3)
   }
 }
 

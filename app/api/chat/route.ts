@@ -508,11 +508,12 @@ export async function POST(request: NextRequest) {
     const contextText = contextParts.join("\n\n---\n\n")
 
     // Convertir Project Brain a texto plano
+    const mainLanguages = projectBrain.summary.mainLanguages?.join(", ") || "N/A"
     const projectBrainText = `PROJECT BRAIN (Contexto del Repositorio):
 Repository ID: ${projectBrain.repositoryId}
 Created: ${projectBrain.createdAt}
-Technologies: ${projectBrain.context.technologies.join(", ") || "N/A"}
-Total Files: ${index.summary.totalFiles}
+Total Files: ${projectBrain.summary.totalFiles}
+Main Languages: ${mainLanguages}
 
 `
 
