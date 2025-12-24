@@ -1,13 +1,16 @@
 "use client"
 
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Plus, Loader2, CheckCircle2, AlertCircle, GitBranch } from "lucide-react"
 import { useRepository } from "@/lib/repository-context"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { AddRepositoryInline } from "./add-repository-inline"
 
 export function HeaderRepository() {
-  const { repositoryId, status, loading, currentIndex, indexRepository } = useRepository()
+  const { repositoryId, status, loading, currentIndex } = useRepository()
+  const [dialogOpen, setDialogOpen] = useState(false)
 
   // Estado visual del repositorio
   const getStatusBadge = () => {
@@ -49,55 +52,56 @@ export function HeaderRepository() {
     return repositoryId
   }
 
-  // Handler para agregar/indexar repositorio (placeholder)
+  // Handler para abrir el modal de agregar repositorio
   const handleAddRepository = () => {
-    // Placeholder: en el futuro esto abrirá un modal o formulario
-    // Por ahora, podemos hacer un ejemplo con un repo hardcodeado para testing
-    // En producción esto debería venir de un modal/formulario
-    console.log("Agregar repositorio - placeholder")
-    // Ejemplo (comentado):
-    // indexRepository("usuario", "repo-ejemplo", "main")
+    setDialogOpen(true)
   }
 
   const repositoryDisplay = formatRepository()
 
   return (
-    <div className="flex items-center gap-3 flex-1 min-w-0">
-      {/* Repositorio activo - Mostrado como texto/Badge simple */}
-      {/* TODO: Cuando haya soporte para múltiples repositorios indexados,
-          reintroducir un Select aquí para permitir cambiar entre repositorios */}
-      <div className="flex items-center gap-2 min-w-0 flex-1">
-        <GitBranch className="h-4 w-4 text-muted-foreground shrink-0" />
-        {repositoryId ? (
-          <Badge variant="outline" className="font-mono text-xs">
-            {repositoryDisplay}
-          </Badge>
-        ) : (
-          <span className="text-sm text-muted-foreground truncate">{repositoryDisplay}</span>
-        )}
+    <div className="flex flex-col gap-2 flex-1 min-w-0">
+      {/* Fila principal: Repositorio + Estado + Botón */}
+      <div className="flex items-center gap-3 flex-1 min-w-0">
+        {/* Repositorio activo - Mostrado como texto/Badge simple */}
+        {/* TODO: Cuando haya soporte para múltiples repositorios indexados,
+            reintroducir un Select aquí para permitir cambiar entre repositorios */}
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <GitBranch className="h-4 w-4 text-muted-foreground shrink-0" />
+          {repositoryId ? (
+            <Badge variant="outline" className="font-mono text-xs">
+              {repositoryDisplay}
+            </Badge>
+          ) : (
+            <span className="text-sm text-muted-foreground truncate">{repositoryDisplay}</span>
+          )}
+        </div>
+
+        {/* Estado del repositorio */}
+        {getStatusBadge()}
+
+        {/* Botón agregar/indexar repositorio */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="icon-sm"
+              variant="outline"
+              onClick={handleAddRepository}
+              disabled={loading || status === "indexing"}
+              className="shrink-0"
+            >
+              <Plus className="h-4 w-4" />
+              <span className="sr-only">Agregar repositorio</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Indexar nuevo repositorio</p>
+          </TooltipContent>
+        </Tooltip>
       </div>
 
-      {/* Estado del repositorio */}
-      {getStatusBadge()}
-
-      {/* Botón agregar/indexar repositorio */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            size="icon-sm"
-            variant="outline"
-            onClick={handleAddRepository}
-            disabled={loading}
-            className="shrink-0"
-          >
-            <Plus className="h-4 w-4" />
-            <span className="sr-only">Agregar repositorio</span>
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>
-          <p>Indexar nuevo repositorio</p>
-        </TooltipContent>
-      </Tooltip>
+      {/* Input inline colapsable para agregar repositorio */}
+      <AddRepositoryInline isOpen={dialogOpen} onClose={() => setDialogOpen(false)} />
     </div>
   )
 }

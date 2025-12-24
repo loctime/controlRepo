@@ -91,30 +91,46 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
           )
 
           if (!response.ok) {
-            if (response.status === 404) {
-              // Índice aún no existe, continuar polling
-              return
-            }
             throw new Error(`Error al obtener estado: ${response.statusText}`)
           }
 
-          const index: RepositoryIndex = await response.json()
+          const data = await response.json()
 
-          // Actualizar estado
-          setCurrentIndex(index)
-          setRepositoryId(index.id)
+          // Verificar si es un RepositoryIndex completo (tiene la propiedad 'files')
+          // o una respuesta parcial (solo tiene 'repositoryId' y 'status')
+          if ("files" in data) {
+            // Es un RepositoryIndex completo
+            const index = data as RepositoryIndex
+            setCurrentIndex(index)
+            setRepositoryId(index.id)
 
-          // Si el estado del índice cambió a "completed" o "error", detener polling
-          if (index.status === "completed") {
-            setStatus("completed")
-            stopPolling()
-          } else if (index.status === "error") {
-            setStatus("error")
-            setError("Error durante la indexación")
-            stopPolling()
+            // Si el estado del índice cambió a "completed" o "error", detener polling
+            if (index.status === "completed") {
+              setStatus("completed")
+              stopPolling()
+            } else if (index.status === "error") {
+              setStatus("error")
+              setError("Error durante la indexación")
+              stopPolling()
+            } else {
+              // Aún está indexando
+              setStatus("indexing")
+            }
           } else {
-            // Aún está indexando
-            setStatus("indexing")
+            // Es una respuesta parcial (indexing o not_found)
+            const partialResponse = data as { repositoryId: string; status: string }
+            setRepositoryId(partialResponse.repositoryId)
+
+            if (partialResponse.status === "indexing") {
+              // Está indexando pero el índice aún no existe
+              setCurrentIndex(null)
+              setStatus("indexing")
+            } else if (partialResponse.status === "not_found") {
+              // No existe índice y tampoco está indexando
+              setCurrentIndex(null)
+              setStatus("idle")
+              stopPolling()
+            }
           }
         } catch (err) {
           console.error("Error en polling:", err)
@@ -229,33 +245,50 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         )
 
         if (!response.ok) {
-          if (response.status === 404) {
-            // No existe índice
-            setCurrentIndex(null)
-            setStatus("idle")
-            setRepositoryId(null)
-            return
-          }
           throw new Error(`Error al obtener estado: ${response.statusText}`)
         }
 
-        const index: RepositoryIndex = await response.json()
+        const data = await response.json()
 
-        setCurrentIndex(index)
-        setRepositoryId(index.id)
+        // Verificar si es un RepositoryIndex completo (tiene la propiedad 'files')
+        // o una respuesta parcial (solo tiene 'repositoryId' y 'status')
+        if ("files" in data) {
+          // Es un RepositoryIndex completo
+          const index = data as RepositoryIndex
+          setCurrentIndex(index)
+          setRepositoryId(index.id)
 
-        // Actualizar status según el estado del índice
-        if (index.status === "indexing") {
-          setStatus("indexing")
-          // Si está indexando, iniciar polling (solo si no hay uno activo)
-          if (!pollingRef.current.intervalId) {
-            startPolling(owner, repo, branch)
+          // Actualizar status según el estado del índice
+          if (index.status === "indexing") {
+            setStatus("indexing")
+            // Si está indexando, iniciar polling (solo si no hay uno activo)
+            if (!pollingRef.current.intervalId) {
+              startPolling(owner, repo, branch)
+            }
+          } else if (index.status === "completed") {
+            setStatus("completed")
+          } else {
+            setStatus("error")
+            setError("Error en el índice")
           }
-        } else if (index.status === "completed") {
-          setStatus("completed")
         } else {
-          setStatus("error")
-          setError("Error en el índice")
+          // Es una respuesta parcial (indexing o not_found)
+          const partialResponse = data as { repositoryId: string; status: string }
+          setRepositoryId(partialResponse.repositoryId)
+
+          if (partialResponse.status === "indexing") {
+            // Está indexando pero el índice aún no existe
+            setCurrentIndex(null)
+            setStatus("indexing")
+            // Iniciar polling (solo si no hay uno activo)
+            if (!pollingRef.current.intervalId) {
+              startPolling(owner, repo, branch)
+            }
+          } else if (partialResponse.status === "not_found") {
+            // No existe índice y tampoco está indexando
+            setCurrentIndex(null)
+            setStatus("idle")
+          }
         }
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Error desconocido al refrescar"
@@ -275,7 +308,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
    */
   const getFilesByCategory = useCallback(
     (category: FileCategory): IndexedFile[] => {
-      if (!currentIndex) return []
+      if (!currentIndex || !currentIndex.files) return []
       return currentIndex.files.filter((file) => file.category === category)
     },
     [currentIndex]
@@ -286,7 +319,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
    */
   const getFilesByType = useCallback(
     (type: FileType): IndexedFile[] => {
-      if (!currentIndex) return []
+      if (!currentIndex || !currentIndex.files) return []
       return currentIndex.files.filter((file) => file.type === type)
     },
     [currentIndex]
@@ -297,7 +330,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
    */
   const getFileByPath = useCallback(
     (path: string): IndexedFile | null => {
-      if (!currentIndex) return null
+      if (!currentIndex || !currentIndex.files) return null
       return currentIndex.files.find((file) => file.path === path) || null
     },
     [currentIndex]
@@ -308,7 +341,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
    */
   const getRelatedFiles = useCallback(
     (path: string): IndexedFile[] => {
-      if (!currentIndex) return []
+      if (!currentIndex || !currentIndex.files) return []
 
       const file = currentIndex.files.find((f) => f.path === path)
       if (!file) return []
@@ -338,7 +371,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
    */
   const searchFiles = useCallback(
     (query: string): IndexedFile[] => {
-      if (!currentIndex || !query.trim()) return []
+      if (!currentIndex || !currentIndex.files || !query.trim()) return []
 
       const lowerQuery = query.toLowerCase().trim()
 

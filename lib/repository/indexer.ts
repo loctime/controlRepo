@@ -8,10 +8,11 @@
  * - Manejo robusto de errores parciales sin dejar estados inconsistentes
  */
 
-import { getRepositoryTree, getRepositoryMetadata, getLastCommit, getFileContent } from "@/lib/github/client"
+import { getRepositoryTree, getRepositoryMetadata, getLastCommit, getFileContent, resolveRepositoryBranch } from "@/lib/github/client"
 import { createIndexedFile } from "@/lib/repository/analyzer"
 import { RepositoryIndex, IndexedFile, FileCategory } from "@/lib/types/repository"
 import { processWithLimit } from "./concurrency"
+import { getRepositoryIndex } from "./storage"
 
 // Límites de seguridad
 const MAX_FILES = 10000
@@ -24,17 +25,24 @@ const KEY_FILES_CONCURRENCY = 4 // Máximo 4 archivos clave procesados simultán
 export async function indexRepository(
   owner: string,
   repo: string,
-  branch: string = "main"
+  branch?: string
 ): Promise<RepositoryIndex> {
   const repositoryId = `${owner}/${repo}`
 
-  // Obtener metadatos del repositorio
+  // Obtener índice existente (debe existir porque se crea antes de llamar esta función)
+  const existingIndex = await getRepositoryIndex(repositoryId)
+  if (!existingIndex) {
+    throw new Error(`Índice inicial no encontrado para ${repositoryId}. Debe crearse antes de iniciar la indexación.`)
+  }
+
+  // Resolver rama automáticamente (usar la misma rama del índice existente si no se proporciona)
+  const resolvedBranch = await resolveRepositoryBranch(owner, repo, branch || existingIndex.branch)
+  const actualBranch = resolvedBranch.branch
+  const lastCommit = resolvedBranch.lastCommit
+
+  // Obtener metadatos del repositorio (pueden haber cambiado)
   const repoMetadata = await getRepositoryMetadata(owner, repo)
   const defaultBranch = repoMetadata.default_branch
-  const actualBranch = branch || defaultBranch
-
-  // Obtener último commit
-  const lastCommit = await getLastCommit(owner, repo, actualBranch)
 
   // Obtener árbol completo
   const tree = await getRepositoryTree(owner, repo, actualBranch)
@@ -173,31 +181,24 @@ export async function indexRepository(
   // Calcular resumen
   const summary = calculateSummary(indexedFiles)
 
-  // Construir RepositoryIndex
-  const repositoryIndex: RepositoryIndex = {
-    id: repositoryId,
-    owner,
-    repo,
-    branch: actualBranch,
-    defaultBranch,
-    status: "completed",
-    indexedAt: new Date().toISOString(),
-    lastCommit,
-    metadata: {
-      description: repoMetadata.description || undefined,
-      language: repoMetadata.language || undefined,
-      stars: repoMetadata.stargazers_count,
-      forks: repoMetadata.forks_count,
-      topics: repoMetadata.topics,
-      createdAt: repoMetadata.created_at,
-      updatedAt: repoMetadata.updated_at,
-    },
-    files: indexedFiles,
-    keyFiles,
-    summary,
+  // Actualizar índice existente con los archivos procesados
+  existingIndex.files = indexedFiles
+  existingIndex.keyFiles = keyFiles
+  existingIndex.summary = summary
+  existingIndex.lastCommit = lastCommit
+  existingIndex.indexedAt = new Date().toISOString()
+  existingIndex.metadata = {
+    description: repoMetadata.description || undefined,
+    language: repoMetadata.language || undefined,
+    stars: repoMetadata.stargazers_count,
+    forks: repoMetadata.forks_count,
+    topics: repoMetadata.topics,
+    createdAt: repoMetadata.created_at,
+    updatedAt: repoMetadata.updated_at,
   }
+  // Nota: status se actualiza a "completed" en el endpoint después de guardar
 
-  return repositoryIndex
+  return existingIndex
 }
 
 /**

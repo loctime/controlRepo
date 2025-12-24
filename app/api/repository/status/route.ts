@@ -29,13 +29,27 @@ export async function GET(request: NextRequest) {
     // Obtener índice
     const index = await getRepositoryIndex(repositoryId)
 
+    // Si no existe índice, devolver estado según si está indexando o no
     if (!index) {
-      return NextResponse.json(
-        {
-          error: "Índice no encontrado. Usa /index para crear uno.",
-        },
-        { status: 404 }
-      )
+      if (indexing) {
+        // Está indexando pero el índice aún no existe
+        return NextResponse.json(
+          {
+            repositoryId,
+            status: "indexing" as const,
+          },
+          { status: 200 }
+        )
+      } else {
+        // No existe índice y tampoco está indexando
+        return NextResponse.json(
+          {
+            repositoryId,
+            status: "not_found" as const,
+          },
+          { status: 200 }
+        )
+      }
     }
 
     // Si está siendo indexado, actualizar estado

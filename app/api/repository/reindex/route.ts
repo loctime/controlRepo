@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { indexRepository } from "@/lib/repository/indexer"
 import { saveRepositoryIndex, acquireIndexLock, releaseIndexLock, getRepositoryIndex } from "@/lib/repository/storage"
 import { IndexResponse } from "@/lib/types/repository"
+import { resolveRepositoryBranch } from "@/lib/github/client"
 
 /**
  * POST /api/repository/reindex
@@ -20,8 +21,15 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Validar GITHUB_TOKEN al inicio
+    if (!process.env.GITHUB_TOKEN) {
+      return NextResponse.json(
+        { error: "GITHUB_TOKEN no configurado. Configura .env.local" },
+        { status: 401 }
+      )
+    }
+
     const repositoryId = `${owner}/${repo}`
-    const actualBranch = branch || "main"
 
     // Verificar si existe un índice previo
     const existingIndex = await getRepositoryIndex(repositoryId)
@@ -46,16 +54,61 @@ export async function POST(request: NextRequest) {
     }
 
     try {
+      // Resolver rama automáticamente (usar la del índice existente si no se proporciona)
+      const resolvedBranch = await resolveRepositoryBranch(owner, repo, branch || existingIndex.branch)
+      const actualBranch = resolvedBranch.branch
+
+      // Actualizar índice existente a status "indexing" antes de iniciar
+      existingIndex.status = "indexing"
+      existingIndex.branch = actualBranch
+      existingIndex.lastCommit = resolvedBranch.lastCommit
+      existingIndex.files = []
+      existingIndex.keyFiles = {}
+      existingIndex.summary = {
+        totalFiles: 0,
+        totalLines: 0,
+        languages: {},
+        categories: {
+          component: 0,
+          hook: 0,
+          service: 0,
+          config: 0,
+          docs: 0,
+          test: 0,
+          utility: 0,
+          style: 0,
+          other: 0,
+        },
+        structure: {
+          components: 0,
+          hooks: 0,
+          services: 0,
+          configs: 0,
+          docs: 0,
+          tests: 0,
+        },
+      }
+      await saveRepositoryIndex(existingIndex)
+      console.log(`[INDEX] Re-indexing started for ${repositoryId}`)
+
       // Iniciar re-indexación de forma asíncrona
       indexRepository(owner, repo, actualBranch)
-        .then(async (index) => {
-          // Guardar nuevo índice (sobrescribe el anterior)
-          await saveRepositoryIndex(index)
+        .then(async (updatedIndex) => {
+          // Actualizar índice con los archivos procesados
+          updatedIndex.status = "completed"
+          await saveRepositoryIndex(updatedIndex)
+          console.log(`[INDEX] Re-indexing completed for ${repositoryId} (${updatedIndex.files.length} files)`)
           // Liberar lock
           await releaseIndexLock(repositoryId)
         })
         .catch(async (error) => {
-          console.error(`Error al re-indexar ${repositoryId}:`, error)
+          console.error(`[INDEX] Error re-indexing ${repositoryId}:`, error)
+          // Actualizar índice con estado de error
+          const errorIndex = await getRepositoryIndex(repositoryId)
+          if (errorIndex) {
+            errorIndex.status = "error"
+            await saveRepositoryIndex(errorIndex)
+          }
           // Liberar lock en caso de error
           await releaseIndexLock(repositoryId)
         })

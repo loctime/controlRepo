@@ -50,7 +50,7 @@ export function SidebarPanel() {
   const styles = hasIndex ? getFilesByCategory("style") : []
 
   // Obtener lenguajes principales (top 5)
-  const topLanguages = hasIndex
+  const topLanguages = hasIndex && currentIndex?.summary?.languages
     ? Object.entries(currentIndex.summary.languages)
         .sort(([, a], [, b]) => b - a)
         .slice(0, 5)
@@ -89,13 +89,13 @@ export function SidebarPanel() {
                     <div className="space-y-2 text-sm text-muted-foreground">
                       <div className="flex justify-between">
                         <span>Archivos totales:</span>
-                        <span className="font-medium text-foreground">{currentIndex.summary.totalFiles.toLocaleString()}</span>
+                        <span className="font-medium text-foreground">{currentIndex?.summary?.totalFiles.toLocaleString() ?? 0}</span>
                       </div>
                       <div className="flex justify-between">
                         <span>Líneas de código:</span>
-                        <span className="font-medium text-foreground">{currentIndex.summary.totalLines.toLocaleString()}</span>
+                        <span className="font-medium text-foreground">{currentIndex?.summary?.totalLines.toLocaleString() ?? 0}</span>
                       </div>
-                      {currentIndex.metadata.language && (
+                      {currentIndex?.metadata?.language && (
                         <div className="flex justify-between">
                           <span>Lenguaje principal:</span>
                           <span className="font-medium text-foreground">{currentIndex.metadata.language}</span>
@@ -123,7 +123,7 @@ export function SidebarPanel() {
                   <div>
                     <h3 className="font-semibold mb-2 text-foreground">Estructura por Categorías</h3>
                     <div className="space-y-2 text-sm">
-                      {Object.entries(currentIndex.summary.categories).map(([category, count]) => {
+                      {Object.entries(currentIndex?.summary?.categories ?? {}).map(([category, count]) => {
                         if (count === 0) return null
                         const Icon = categoryIcons[category as FileCategory]
                         return (
@@ -139,7 +139,7 @@ export function SidebarPanel() {
                     </div>
                   </div>
 
-                  {currentIndex.metadata.description && (
+                  {currentIndex?.metadata?.description && (
                     <div>
                       <h3 className="font-semibold mb-2 text-foreground">Descripción</h3>
                       <p className="text-sm text-muted-foreground leading-relaxed">{currentIndex.metadata.description}</p>
@@ -353,7 +353,7 @@ export function SidebarPanel() {
                   <li>Puede hacer preguntas relacionadas</li>
                 </ol>
               </div>
-              {hasIndex && (
+              {hasIndex && currentIndex && (
                 <div>
                   <h3 className="font-semibold mb-2 text-foreground">Flujo de Indexación</h3>
                   <ol className="space-y-2 text-sm text-muted-foreground list-decimal list-inside">
