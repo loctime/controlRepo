@@ -1,8 +1,10 @@
 "use client"
 
+import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { FileText, Map, GitBranch, Code2, Package, Settings, BookOpen, TestTube, Wrench, Palette } from "lucide-react"
 import { useRepository } from "@/lib/repository-context"
 import { FileCategory } from "@/lib/types/repository"
@@ -34,10 +36,43 @@ const categoryLabels: Record<FileCategory, string> = {
 }
 
 export function SidebarPanel() {
-  const { currentIndex, getFilesByCategory } = useRepository()
+  const { currentIndex, getFilesByCategory, reindexRepository } = useRepository()
+  const [branches, setBranches] = useState<string[]>([])
+  const [loadingBranches, setLoadingBranches] = useState(false)
 
   // Detectar si hay índice disponible
   const hasIndex = currentIndex !== null
+
+  // Obtener ramas disponibles cuando hay un índice
+  useEffect(() => {
+    if (currentIndex?.owner && currentIndex?.repo) {
+      setLoadingBranches(true)
+      fetch(`/api/repository/branches?owner=${encodeURIComponent(currentIndex.owner)}&repo=${encodeURIComponent(currentIndex.repo)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.branches) {
+            setBranches(data.branches)
+          }
+        })
+        .catch((err) => {
+          console.error("Error al obtener ramas:", err)
+        })
+        .finally(() => {
+          setLoadingBranches(false)
+        })
+    }
+  }, [currentIndex?.owner, currentIndex?.repo])
+
+  // Handler para cambiar de rama
+  const handleBranchChange = async (newBranch: string) => {
+    if (!currentIndex || newBranch === currentIndex.branch) return
+    
+    try {
+      await reindexRepository(currentIndex.owner, currentIndex.repo, newBranch)
+    } catch (error) {
+      console.error("Error al cambiar de rama:", error)
+    }
+  }
 
   // Obtener archivos por categoría cuando hay índice
   const components = hasIndex ? getFilesByCategory("component") : []
@@ -358,7 +393,32 @@ export function SidebarPanel() {
                   <h3 className="font-semibold mb-2 text-foreground">Flujo de Indexación</h3>
                   <ol className="space-y-2 text-sm text-muted-foreground list-decimal list-inside">
                     <li>Repositorio indexado: {currentIndex.id}</li>
-                    <li>Rama: {currentIndex.branch}</li>
+                    <li className="flex items-center gap-2">
+                      <span>Rama:</span>
+                      <Select
+                        value={currentIndex.branch}
+                        onValueChange={handleBranchChange}
+                        disabled={loadingBranches || branches.length === 0}
+                      >
+                        <SelectTrigger className="h-7 w-auto min-w-[120px] text-xs gap-1">
+                          <GitBranch className="h-3 w-3 shrink-0" />
+                          <SelectValue placeholder="Cargando ramas..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {branches.map((branch) => (
+                            <SelectItem key={branch} value={branch}>
+                              <div className="flex items-center gap-2">
+                                <GitBranch className="h-3 w-3" />
+                                {branch}
+                                {branch === currentIndex.branch && (
+                                  <span className="text-xs text-muted-foreground">(actual)</span>
+                                )}
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </li>
                     <li>Última actualización: {new Date(currentIndex.indexedAt).toLocaleDateString()}</li>
                     <li>Estado: {currentIndex.status === "completed" ? "Completado" : "En proceso"}</li>
                   </ol>

@@ -1,7 +1,6 @@
 import React from "react"
 import { SidebarDocs } from "./sidebar-docs"
 import { ChatPanel } from "./chat-panel"
-import { ContextPanel } from "./context-panel"
 import { ThemeToggle } from "./theme-toggle"
 import { LogoutButton } from "./logout-button"
 import { HeaderRepository } from "./header-repository"
@@ -22,7 +21,6 @@ export function AppLayout({ children }: AppLayoutProps) {
             </div>
             <HeaderRepository />
             <div className="flex items-center gap-3 flex-shrink-0">
-              <ContextPanel />
               <ThemeToggle />
               <LogoutButton />
             </div>

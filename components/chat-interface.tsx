@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Send, Bot, User } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { ContextPanel } from "./context-panel"
 
 interface Message {
   role: "user" | "assistant"
@@ -46,9 +47,14 @@ export function ChatInterface() {
   return (
     <Card className="h-full flex flex-col border-border py-0 gap-0">
       <div className="border-b border-border px-3 py-2">
-        <div>
-          <h2 className="font-semibold text-foreground">Chat del Repositorio</h2>
-          <p className="text-xs text-muted-foreground mt-1">Modo solo lectura - Consulta sobre el proyecto</p>
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <h2 className="font-semibold text-foreground">Chat del Repositorio</h2>
+            <p className="text-xs text-muted-foreground mt-1">Modo solo lectura - Consulta sobre el proyecto</p>
+          </div>
+          <div className="shrink-0">
+            <ContextPanel compact />
+          </div>
         </div>
       </div>
 
