@@ -30,6 +30,37 @@ const RepositoryContext = createContext<RepositoryContextType | undefined>(undef
 
 const POLLING_INTERVAL = 4000 // 4 segundos (entre 3-5 segundos)
 
+/**
+ * Busca archivos por query (busca en nombre, path, tags y descripción)
+ * Función pura exportable para uso en backend y frontend
+ */
+export function searchFiles(files: IndexedFile[], query: string): IndexedFile[] {
+  if (!files || files.length === 0 || !query.trim()) {
+    return []
+  }
+
+  const lowerQuery = query.toLowerCase().trim()
+
+  return files.filter((file) => {
+    // Buscar en nombre
+    if (file.name.toLowerCase().includes(lowerQuery)) return true
+
+    // Buscar en path
+    if (file.path.toLowerCase().includes(lowerQuery)) return true
+
+    // Buscar en tags
+    if (file.tags.some((tag) => tag.toLowerCase().includes(lowerQuery))) return true
+
+    // Buscar en descripción
+    if (file.summary.description?.toLowerCase().includes(lowerQuery)) return true
+
+    // Buscar en exports
+    if (file.summary.exports?.some((exp) => exp.toLowerCase().includes(lowerQuery))) return true
+
+    return false
+  })
+}
+
 export function RepositoryProvider({ children }: { children: React.ReactNode }) {
   const [currentIndex, setCurrentIndex] = useState<RepositoryIndex | null>(null)
   const [status, setStatus] = useState<RepositoryStatus>("idle")
@@ -369,30 +400,10 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
   /**
    * Busca archivos por query (busca en nombre, path, tags y descripción)
    */
-  const searchFiles = useCallback(
+  const searchFilesCallback = useCallback(
     (query: string): IndexedFile[] => {
       if (!currentIndex || !currentIndex.files || !query.trim()) return []
-
-      const lowerQuery = query.toLowerCase().trim()
-
-      return currentIndex.files.filter((file) => {
-        // Buscar en nombre
-        if (file.name.toLowerCase().includes(lowerQuery)) return true
-
-        // Buscar en path
-        if (file.path.toLowerCase().includes(lowerQuery)) return true
-
-        // Buscar en tags
-        if (file.tags.some((tag) => tag.toLowerCase().includes(lowerQuery))) return true
-
-        // Buscar en descripción
-        if (file.summary.description?.toLowerCase().includes(lowerQuery)) return true
-
-        // Buscar en exports
-        if (file.summary.exports?.some((exp) => exp.toLowerCase().includes(lowerQuery))) return true
-
-        return false
-      })
+      return searchFiles(currentIndex.files, query)
     },
     [currentIndex]
   )
@@ -410,7 +421,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
     getFilesByType,
     getFileByPath,
     getRelatedFiles,
-    searchFiles,
+    searchFiles: searchFilesCallback,
   }
 
   return <RepositoryContext.Provider value={value}>{children}</RepositoryContext.Provider>

@@ -8,6 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Send, Bot, User } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { ContextPanel } from "./context-panel"
+import { useRepository } from "@/lib/repository-context"
 
 interface Message {
   role: "user" | "assistant"
@@ -23,25 +24,76 @@ export function ChatInterface() {
     },
   ])
   const [input, setInput] = useState("")
+  const [loading, setLoading] = useState(false)
+  const { repositoryId } = useRepository()
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!input.trim()) return
 
-    setMessages([...messages, { role: "user", content: input }])
+    const userMessage = input.trim()
+    setMessages([...messages, { role: "user", content: userMessage }])
+    setInput("")
+    setLoading(true)
 
-    // Simular respuesta del asistente
-    setTimeout(() => {
+    try {
+      // Verificar que hay un repositorio indexado
+      if (!repositoryId) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: "No hay un repositorio indexado. Por favor, indexa un repositorio primero.",
+          },
+        ])
+        setLoading(false)
+        return
+      }
+
+      // Consultar el endpoint
+      const response = await fetch("/api/repository/query", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          question: userMessage,
+          repositoryId,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        // Error de la API
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: `Error: ${data.error || "Error desconocido al consultar el repositorio."}`,
+          },
+        ])
+      } else {
+        // Respuesta exitosa
+        const fileCount = data.files?.length || 0
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: `Encontré ${fileCount} archivo${fileCount !== 1 ? "s" : ""} relevante${fileCount !== 1 ? "s" : ""} en el repositorio.`,
+          },
+        ])
+      }
+    } catch (error) {
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content:
-            "Esta es una respuesta de ejemplo. En una implementación real, aquí se mostraría la información del repositorio basada en tu pregunta.",
+          content: `Error: ${error instanceof Error ? error.message : "Error desconocido al consultar el repositorio."}`,
         },
       ])
-    }, 500)
-
-    setInput("")
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -102,7 +154,7 @@ export function ChatInterface() {
             placeholder="Pregunta sobre el repositorio..."
             className="flex-1"
           />
-          <Button type="submit" size="icon">
+          <Button type="submit" size="icon" disabled={loading}>
             <Send className="h-4 w-4" />
             <span className="sr-only">Enviar mensaje</span>
           </Button>
