@@ -66,6 +66,32 @@ Componentes:
 - LoginForm
 - LogoutButton
 
+## 6. Persistencia de Datos
+
+El sistema maneja tres tipos de datos persistentes completamente separados:
+
+### Repositorio Indexado
+- **Ubicación**: `.repository-indexes/`
+- **Contenido**: Metadata del repositorio (estructura, archivos, relaciones)
+- **Pertenencia**: Por usuario (cada usuario puede tener múltiples repositorios indexados)
+- **Actualización**: Solo durante indexación/re-indexación
+
+### Project Brain
+- **Ubicación**: `.project-brains/{repositoryId}/`
+- **Contenido**: Conocimiento acumulado sobre el repositorio (arquitectura, decisiones, contexto global)
+- **Pertenencia**: Al repositorio (compartido entre usuarios que consultan el mismo repo)
+- **Actualización**: Se construye gradualmente a partir de insights arquitectónicos
+- **Importante**: NO contiene historial de conversaciones
+
+### Chat History
+- **Ubicación**: `.chat-history/{userId}/{repositoryId}/`
+- **Contenido**: Historial de conversaciones entre usuario y asistente
+- **Pertenencia**: Por usuario + repositorio (privado para cada usuario)
+- **Actualización**: Se guarda cada mensaje de la conversación
+- **Importante**: NO forma parte del Project Brain, NO modifica arquitectura
+
+Ver `docs/persistence.md` para detalles completos sobre la separación de persistencia.
+
 ## Principio clave
 Ningún componente tiene conocimiento global del sistema.
 Todo se comunica por composición visual, no por lógica compartida.

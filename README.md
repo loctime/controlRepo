@@ -31,18 +31,20 @@ El objetivo principal es servir como:
 ## 📁 Documentación
 Toda la documentación técnica se encuentra en la carpeta `/docs`:
 
-- architecture.md
-- modules.md
-- flows.md
-- decisions.md
-- limitations.md
-- roadmap.md
+- architecture.md - Arquitectura general del sistema
+- persistence.md - **Separación de persistencia (Repositorio Indexado, Project Brain, Chat History)**
+- modules.md - Módulos del sistema
+- flows.md - Flujos principales
+- decisions.md - Decisiones de diseño
+- limitations.md - Limitaciones conocidas
+- roadmap.md - Roadmap del proyecto
 
 ## 🔒 Principios del sistema
 - Transparencia total del contexto
 - Separación estricta de responsabilidades
 - Diseño anti-alucinación
 - Lectura y consulta únicamente
+- **Separación clara de persistencia**: Repositorio Indexado, Project Brain y Chat History son entidades completamente independientes
 
 ## 🚧 Estado actual
 - ✅ UI base completa
