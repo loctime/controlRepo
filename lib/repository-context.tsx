@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from "react"
 import { RepositoryIndex, IndexedFile, FileCategory, FileType } from "./types/repository"
+import { searchFiles as searchFilesUtil } from "./repository/search"
 
 type RepositoryStatus = "idle" | "indexing" | "completed" | "error"
 
@@ -29,37 +30,6 @@ interface RepositoryContextType {
 const RepositoryContext = createContext<RepositoryContextType | undefined>(undefined)
 
 const POLLING_INTERVAL = 4000 // 4 segundos (entre 3-5 segundos)
-
-/**
- * Busca archivos por query (busca en nombre, path, tags y descripción)
- * Función pura exportable para uso en backend y frontend
- */
-export function searchFiles(files: IndexedFile[], query: string): IndexedFile[] {
-  if (!files || files.length === 0 || !query.trim()) {
-    return []
-  }
-
-  const lowerQuery = query.toLowerCase().trim()
-
-  return files.filter((file) => {
-    // Buscar en nombre
-    if (file.name.toLowerCase().includes(lowerQuery)) return true
-
-    // Buscar en path
-    if (file.path.toLowerCase().includes(lowerQuery)) return true
-
-    // Buscar en tags
-    if (file.tags.some((tag) => tag.toLowerCase().includes(lowerQuery))) return true
-
-    // Buscar en descripción
-    if (file.summary.description?.toLowerCase().includes(lowerQuery)) return true
-
-    // Buscar en exports
-    if (file.summary.exports?.some((exp) => exp.toLowerCase().includes(lowerQuery))) return true
-
-    return false
-  })
-}
 
 export function RepositoryProvider({ children }: { children: React.ReactNode }) {
   const [currentIndex, setCurrentIndex] = useState<RepositoryIndex | null>(null)
@@ -403,7 +373,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
   const searchFilesCallback = useCallback(
     (query: string): IndexedFile[] => {
       if (!currentIndex || !currentIndex.files || !query.trim()) return []
-      return searchFiles(currentIndex.files, query)
+      return searchFilesUtil(currentIndex.files, query)
     },
     [currentIndex]
   )

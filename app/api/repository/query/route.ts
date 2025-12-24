@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getRepositoryIndex } from "@/lib/repository/storage-filesystem"
-import { searchFiles } from "@/lib/repository-context"
+import { searchFiles } from "@/lib/repository/search"
 
 /**
  * POST /api/repository/query
