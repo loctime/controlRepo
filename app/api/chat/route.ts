@@ -5,6 +5,136 @@ import { IndexedFile } from "@/lib/types/repository"
 import { getSystemPrompt, DEFAULT_ROLE, type AssistantRole } from "@/lib/prompts/system-prompts"
 
 /**
+ * Limpia la respuesta del asistente eliminando razonamiento interno, intenciones detectadas y metadata de debug
+ */
+function cleanAnswerFromInternalReasoning(answer: string): string {
+  let cleaned = answer
+  
+  // Eliminar bloques de razonamiento interno comunes
+  const reasoningPatterns = [
+    /Intención\s+(?:de\s+la\s+)?pregunta[^\n]*:?\s*\n?[^\n]*\n?/gi,
+    /Intención\s+detectada[^\n]*:?\s*\n?[^\n]*\n?/gi,
+    /Resumen\s+basado\s+en[^\n]*:?\s*\n?[^\n]*\n?/gi,
+    /Análisis\s+de\s+la\s+pregunta[^\n]*:?\s*\n?[^\n]*\n?/gi,
+    /Detectando\s+intención[^\n]*:?\s*\n?[^\n]*\n?/gi,
+    /Basándome\s+en\s+el\s+contexto[^\n]*:?\s*\n?[^\n]*\n?/gi,
+    /Parece\s+que\s+la\s+pregunta[^\n]*:?\s*\n?[^\n]*\n?/gi,
+    /La\s+pregunta\s+parece\s+referirse\s+a[^\n]*:?\s*\n?[^\n]*\n?/gi,
+  ]
+  
+  reasoningPatterns.forEach(pattern => {
+    cleaned = cleaned.replace(pattern, '')
+  })
+  
+  // Eliminar líneas que contengan lenguaje especulativo al inicio
+  const lines = cleaned.split('\n')
+  const filteredLines = lines.filter(line => {
+    const trimmed = line.trim()
+    // Eliminar líneas que empiezan con lenguaje especulativo
+    if (/^(Parece|Probablemente|Posiblemente|Tal vez|Quizás|Es probable que|Es posible que)/i.test(trimmed)) {
+      return false
+    }
+    return true
+  })
+  
+  cleaned = filteredLines.join('\n').trim()
+  
+  return cleaned
+}
+
+/**
+ * Valida que una fuente exista en el índice real del repositorio
+ */
+function validateSourceExists(sourcePath: string, indexFiles: IndexedFile[]): boolean {
+  const normalizedPath = sourcePath.trim().replace(/\\/g, '/')
+  const fileName = normalizedPath.split('/').pop() || normalizedPath
+  
+  // Buscar coincidencia exacta o parcial
+  return indexFiles.some((file: IndexedFile) => {
+    return file.path === normalizedPath ||
+           file.path.endsWith(normalizedPath) ||
+           file.path.includes(normalizedPath) ||
+           file.name === fileName
+  })
+}
+
+/**
+ * Fuerza el formato de salida estándar en la respuesta
+ */
+function enforceOutputFormat(answer: string): string {
+  // Verificar si ya tiene el formato correcto
+  const hasSources = /Fuentes\s*\([^)]*\)\s*:?\s*\n?/i.test(answer)
+  const hasRespuesta = /Respuesta\s*:?\s*\n?/i.test(answer)
+  
+  // Si ya tiene el formato básico, solo limpiar
+  if (hasSources && hasRespuesta) {
+    return answer
+  }
+  
+  // Si no tiene formato, intentar estructurarlo
+  // Primero buscar si hay contenido útil
+  const trimmed = answer.trim()
+  if (!trimmed) {
+    return "Fuentes:\nRespuesta:\nMejoras / Riesgos:\nFalta contexto:"
+  }
+  
+  // Intentar extraer contenido y estructurarlo
+  const parts: string[] = []
+  
+  // Buscar fuentes mencionadas
+  const sourcesMatch = answer.match(/Fuentes?\s*[:\-]?\s*\n?([\s\S]*?)(?=\n(?:Respuesta|Mejoras|Falta|$))/i)
+  if (sourcesMatch) {
+    parts.push(`Fuentes:\n${sourcesMatch[1].trim()}`)
+  } else {
+    parts.push("Fuentes:")
+  }
+  
+  // Buscar respuesta
+  const respuestaMatch = answer.match(/Respuesta\s*[:\-]?\s*\n?([\s\S]*?)(?=\n(?:⚠️|Mejoras|Falta|Preguntas|$))/i)
+  if (respuestaMatch) {
+    parts.push(`Respuesta:\n${respuestaMatch[1].trim()}`)
+  } else {
+    // Si no hay sección de respuesta explícita, usar todo el contenido como respuesta
+    const contentWithoutSources = answer.replace(/Fuentes?\s*[:\-]?\s*\n?[\s\S]*?(?=\n(?:Respuesta|⚠️|Mejoras|Falta|Preguntas|$))/i, '').trim()
+    if (contentWithoutSources) {
+      parts.push(`Respuesta:\n${contentWithoutSources}`)
+    } else {
+      parts.push("Respuesta:")
+    }
+  }
+  
+  // Buscar sección "No confirmado en el repositorio"
+  const noConfirmadoMatch = answer.match(/⚠️\s*No\s+confirmado\s+en\s+el\s+repositorio\s*[:\-]?\s*\n?([\s\S]*?)(?=\n(?:Mejoras|Falta|Preguntas|$))/i)
+  if (noConfirmadoMatch) {
+    parts.push(`⚠️ No confirmado en el repositorio:\n${noConfirmadoMatch[1].trim()}`)
+  }
+  
+  // Buscar mejoras/riesgos
+  const mejorasMatch = answer.match(/Mejoras\s*\/\s*Riesgos?\s*[:\-]?\s*\n?([\s\S]*?)(?=\n(?:Falta|Preguntas|$))/i)
+  if (mejorasMatch) {
+    parts.push(`Mejoras / Riesgos:\n${mejorasMatch[1].trim()}`)
+  } else {
+    parts.push("Mejoras / Riesgos:")
+  }
+  
+  // Buscar falta contexto
+  const faltaMatch = answer.match(/Falta\s+contexto\s*[:\-]?\s*\n?([\s\S]*?)(?=\n(?:Preguntas|$))/i)
+  if (faltaMatch) {
+    parts.push(`Falta contexto:\n${faltaMatch[1].trim()}`)
+  } else {
+    parts.push("Falta contexto:")
+  }
+  
+  // Buscar preguntas de seguimiento
+  const preguntasMatch = answer.match(/Preguntas\s+de\s+seguimiento\s*[:\-]?\s*\n?([\s\S]*?)$/i)
+  if (preguntasMatch) {
+    parts.push(`Preguntas de seguimiento:\n${preguntasMatch[1].trim()}`)
+  }
+  
+  return parts.join('\n\n')
+}
+
+/**
  * Extrae las fuentes (archivos/rutas) declaradas explícitamente en la respuesta del asistente
  * Busca el bloque "Fuentes (archivos/rutas):" y parsea las rutas mencionadas
  */
@@ -129,7 +259,6 @@ export async function POST(request: NextRequest) {
     const { question, repositoryId, role, conversationMemory } = body
     
     // Determinar el rol del asistente (por defecto: architecture-explainer)
-    // TODO: Hacer configurable desde UI en el futuro
     const assistantRole: AssistantRole = role && (role === "architecture-explainer" || role === "structure-auditor")
       ? role
       : DEFAULT_ROLE
@@ -178,10 +307,15 @@ export async function POST(request: NextRequest) {
     const contextParts: string[] = []
 
     if (relevantFiles.length === 0) {
-      // Si no hay archivos relevantes, responder directamente sin llamar a Ollama
+      // Si no hay archivos relevantes, rechazar explícitamente sin inferencias
       return NextResponse.json({
-        answer: "No se encontró información relevante en el repositorio para responder tu pregunta. Intenta reformular tu consulta o verifica que el repositorio esté correctamente indexado.",
+        answer: "Fuentes:\n\nRespuesta:\nNo hay evidencia en el repositorio para responder esta pregunta.\n\nMejoras / Riesgos:\n\nFalta contexto:",
         files: [],
+        sourcesDeclared: false,
+        findings: {
+          improvements: [],
+          risks: [],
+        },
         debug: {
           model: "phi3:mini",
           contextFiles: 0,
@@ -265,74 +399,97 @@ export async function POST(request: NextRequest) {
     }
 
     // Extraer respuesta del modelo
-    const answer = ollamaResponse.response || ollamaResponse.text || "No se pudo generar una respuesta."
-    const trimmedAnswer = answer.trim()
-
-    // Extraer fuentes explícitas declaradas en la respuesta
-    const declaredSources = extractSourcesFromAnswer(trimmedAnswer)
+    const rawAnswer = ollamaResponse.response || ollamaResponse.text || "No se pudo generar una respuesta."
     
-    // Extraer hallazgos clave (mejoras y riesgos) de la respuesta
-    const findings = extractFindingsFromAnswer(trimmedAnswer)
+    // Limpiar razonamiento interno y metadata de debug
+    const cleanedAnswer = cleanAnswerFromInternalReasoning(rawAnswer)
+    
+    // Extraer fuentes explícitas declaradas en la respuesta ANTES de validar
+    const declaredSources = extractSourcesFromAnswer(cleanedAnswer)
+    
+    // Validar que todas las fuentes mencionadas existan en el índice real
+    const validSources = declaredSources.filter(sourcePath => 
+      validateSourceExists(sourcePath, index.files)
+    )
+    
+    // Si hay fuentes inválidas, loguearlas pero no incluirlas
+    const invalidSources = declaredSources.filter(sourcePath => 
+      !validateSourceExists(sourcePath, index.files)
+    )
+    if (invalidSources.length > 0) {
+      console.warn(`Fuentes inválidas descartadas: ${invalidSources.join(', ')}`)
+    }
+    
+    // Si no hay fuentes válidas pero hay archivos relevantes, usar los archivos relevantes como fuentes
+    const finalSources = validSources.length > 0 
+      ? validSources 
+      : relevantFiles.map((file: IndexedFile) => file.path)
+    
+    // Limpiar la respuesta removiendo referencias a fuentes inválidas
+    let finalAnswer = cleanedAnswer
+    invalidSources.forEach(invalidSource => {
+      // Remover referencias a fuentes inválidas de la respuesta
+      const escapedSource = invalidSource.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const sourcePattern = new RegExp(`\\b${escapedSource}\\b`, 'gi')
+      finalAnswer = finalAnswer.replace(sourcePattern, '')
+    })
+    
+    // Forzar formato de salida estándar
+    const formattedAnswer = enforceOutputFormat(finalAnswer.trim())
+    
+    // Extraer hallazgos clave (mejoras y riesgos) de la respuesta formateada
+    const findings = extractFindingsFromAnswer(formattedAnswer)
 
-    // Mapear las fuentes declaradas a archivos del índice (si existen)
+    // Mapear SOLO las fuentes válidas a archivos del índice
     const declaredFiles: Array<{ path: string; name: string }> = []
     const processedPaths = new Set<string>() // Evitar duplicados
     
-    if (declaredSources.length > 0) {
-      // Buscar coincidencias exactas o parciales en el índice
-      declaredSources.forEach((sourcePath) => {
-        if (processedPaths.has(sourcePath)) {
-          return // Ya procesado
-        }
-        
-        // Normalizar la ruta (remover espacios, normalizar separadores)
-        const normalizedPath = sourcePath.trim().replace(/\\/g, '/')
-        const fileName = normalizedPath.split('/').pop() || normalizedPath
-        
-        // Buscar archivo en el índice con orden de prioridad:
-        // 1. Coincidencia exacta
-        // 2. Termina con la ruta
-        // 3. Contiene la ruta
-        // 4. Nombre de archivo coincide
-        let matchingFile: IndexedFile | undefined = undefined
-        
-        matchingFile = index.files.find((file: IndexedFile) => file.path === normalizedPath)
-        if (!matchingFile) {
-          matchingFile = index.files.find((file: IndexedFile) => file.path.endsWith(normalizedPath))
-        }
-        if (!matchingFile) {
-          matchingFile = index.files.find((file: IndexedFile) => file.path.includes(normalizedPath))
-        }
-        if (!matchingFile) {
-          matchingFile = index.files.find((file: IndexedFile) => file.name === fileName)
-        }
-        
-        if (matchingFile) {
-          // Evitar duplicados por path completo
-          if (!processedPaths.has(matchingFile.path)) {
-            declaredFiles.push({
-              path: matchingFile.path,
-              name: matchingFile.name,
-            })
-            processedPaths.add(matchingFile.path)
-            processedPaths.add(sourcePath)
-          }
-        } else {
-          // Si no se encuentra en el índice, agregar la ruta tal como fue declarada
-          // Esto permite mostrar fuentes que el asistente menciona aunque no estén indexadas
+    // Usar solo fuentes válidas (que existen en el índice)
+    finalSources.forEach((sourcePath) => {
+      if (processedPaths.has(sourcePath)) {
+        return // Ya procesado
+      }
+      
+      // Normalizar la ruta (remover espacios, normalizar separadores)
+      const normalizedPath = sourcePath.trim().replace(/\\/g, '/')
+      const fileName = normalizedPath.split('/').pop() || normalizedPath
+      
+      // Buscar archivo en el índice con orden de prioridad:
+      // 1. Coincidencia exacta
+      // 2. Termina con la ruta
+      // 3. Contiene la ruta
+      // 4. Nombre de archivo coincide
+      let matchingFile: IndexedFile | undefined = undefined
+      
+      matchingFile = index.files.find((file: IndexedFile) => file.path === normalizedPath)
+      if (!matchingFile) {
+        matchingFile = index.files.find((file: IndexedFile) => file.path.endsWith(normalizedPath))
+      }
+      if (!matchingFile) {
+        matchingFile = index.files.find((file: IndexedFile) => file.path.includes(normalizedPath))
+      }
+      if (!matchingFile) {
+        matchingFile = index.files.find((file: IndexedFile) => file.name === fileName)
+      }
+      
+      if (matchingFile) {
+        // Evitar duplicados por path completo
+        if (!processedPaths.has(matchingFile.path)) {
           declaredFiles.push({
-            path: normalizedPath,
-            name: fileName,
+            path: matchingFile.path,
+            name: matchingFile.name,
           })
+          processedPaths.add(matchingFile.path)
           processedPaths.add(sourcePath)
         }
-      })
-    }
+      }
+      // NO agregar fuentes que no existen en el índice - descartarlas silenciosamente
+    })
 
     return NextResponse.json({
-      answer: trimmedAnswer,
+      answer: formattedAnswer,
       files: declaredFiles.length > 0 ? declaredFiles : [],
-      sourcesDeclared: declaredSources.length > 0,
+      sourcesDeclared: validSources.length > 0,
       findings: {
         improvements: findings.improvements,
         risks: findings.risks,
@@ -340,7 +497,8 @@ export async function POST(request: NextRequest) {
       debug: {
         model: "phi3:mini",
         contextFiles: relevantFiles.length,
-        declaredSources: declaredSources.length,
+        declaredSources: validSources.length,
+        invalidSourcesDiscarded: invalidSources.length,
         role: assistantRole,
       },
     })
