@@ -130,13 +130,17 @@ export async function POST(request: NextRequest) {
           await saveRepositoryIndex(updatedIndex)
           console.log(`[INDEX] Indexing completed for ${repositoryId} (${updatedIndex.files.length} files)`)
           
-          // Crear Project Brain solo si no existe
+          // Crear o obtener Project Brain
           const brainExists = await hasProjectBrain(repositoryId)
           let projectBrain = undefined
           if (!brainExists) {
             projectBrain = generateMinimalProjectBrain(updatedIndex)
             await saveProjectBrain(projectBrain)
             console.log(`[INDEX] Project Brain created for ${repositoryId}`)
+          } else {
+            // Obtener Project Brain existente para pasarlo a generateMetrics
+            const { getProjectBrain } = await import("@/lib/project-brain/storage-filesystem")
+            projectBrain = await getProjectBrain(repositoryId) || undefined
           }
           
           // Generar y guardar métricas

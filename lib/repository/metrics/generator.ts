@@ -1,200 +1,166 @@
 /**
  * Generador de métricas de repositorio
- * Procesa un RepositoryIndex y genera métricas estructuradas
+ * Procesa el índice y genera métricas estructurales y de relaciones
  */
 
 import { RepositoryIndex } from "@/lib/types/repository"
 import { ProjectBrain } from "@/lib/types/project-brain"
 import { RepositoryMetrics } from "@/lib/types/repository-metrics"
-import path from "path"
+import { posix } from "path"
 
 /**
- * Normaliza un path a formato Unix con / final si es directorio
- * Asegura paths relativos sin dependencia del OS
+ * Normaliza un path a formato POSIX relativo con / final si es directorio
  */
 function normalizeFolderPath(filePath: string): string {
-  // Normalizar separadores a /
-  let normalized = filePath.replace(/\\/g, "/")
+  // Obtener directorio del archivo
+  const dir = posix.dirname(filePath)
   
-  // Remover leading slash si existe (para paths relativos)
-  if (normalized.startsWith("/")) {
-    normalized = normalized.substring(1)
-  }
-  
-  // Obtener directorio usando path.posix
-  const dir = path.posix.dirname(normalized)
-  
-  // Si el directorio es "." significa que está en la raíz
-  // Retornar string vacío para raíz, o el directorio con / final
+  // Si es raíz, retornar "/"
   if (dir === "." || dir === "/") {
-    return ""
+    return "/"
   }
   
-  // Asegurar que termine con /
-  return dir.endsWith("/") ? dir : `${dir}/`
+  // Normalizar y asegurar que termine con /
+  const normalized = posix.normalize(dir)
+  return normalized.endsWith("/") ? normalized : `${normalized}/`
 }
 
 /**
  * Obtiene la extensión de un archivo
  */
 function getFileExtension(filePath: string): string {
-  const ext = path.posix.extname(filePath)
-  return ext || ""
+  const ext = posix.extname(filePath)
+  return ext || ".none"
 }
 
 /**
- * Detecta si un archivo es un entrypoint basado en su nombre
+ * Detecta si un archivo es un entrypoint y retorna la razón
  */
-function isEntrypointByFilename(fileName: string): boolean {
-  const lowerName = fileName.toLowerCase()
-  return (
-    lowerName === "index.ts" ||
-    lowerName === "index.js" ||
-    lowerName === "index.tsx" ||
-    lowerName === "index.jsx" ||
-    lowerName === "main.ts" ||
-    lowerName === "main.js"
-  )
-}
-
-/**
- * Detecta si un archivo es un entrypoint basado en su ubicación
- */
-function isEntrypointByLocation(filePath: string): boolean {
-  // Normalizar separadores y remover leading slash si existe
-  let normalized = filePath.replace(/\\/g, "/")
-  if (normalized.startsWith("/")) {
-    normalized = normalized.substring(1)
+function detectEntrypoint(filePath: string): { isEntrypoint: boolean; reason?: "filename" | "location" | "config" } {
+  const fileName = posix.basename(filePath)
+  const normalizedPath = posix.normalize(filePath)
+  
+  // Detección por nombre de archivo
+  const entrypointFilenames = ["index.ts", "index.js", "main.ts", "main.js", "index.tsx", "main.tsx"]
+  if (entrypointFilenames.includes(fileName)) {
+    return { isEntrypoint: true, reason: "filename" }
   }
   
-  const lowerPath = normalized.toLowerCase()
+  // Detección por ubicación
+  const entrypointLocations = [
+    "app/page.tsx",
+    "app/page.jsx",
+    "src/index.ts",
+    "src/index.js",
+    "src/main.ts",
+    "src/main.js",
+  ]
   
-  return (
-    lowerPath === "app/page.tsx" ||
-    lowerPath === "app/page.jsx" ||
-    lowerPath === "src/index.ts" ||
-    lowerPath === "src/index.js" ||
-    lowerPath === "src/main.ts" ||
-    lowerPath === "src/main.js" ||
-    lowerPath === "index.ts" ||
-    lowerPath === "index.js" ||
-    lowerPath === "main.ts" ||
-    lowerPath === "main.js"
-  )
+  // Verificar si el path coincide con alguna ubicación de entrypoint
+  for (const location of entrypointLocations) {
+    if (normalizedPath === location || normalizedPath.endsWith(`/${location}`)) {
+      return { isEntrypoint: true, reason: "location" }
+    }
+  }
+  
+  return { isEntrypoint: false }
 }
 
 /**
- * Genera métricas a partir de un RepositoryIndex
- * @param index El índice del repositorio
- * @param projectBrain Opcional - ProjectBrain del repositorio (no usado en MVP pero incluido para compatibilidad futura)
+ * Genera métricas a partir de un índice de repositorio
  */
 export function generateMetrics(
   index: RepositoryIndex,
   projectBrain?: ProjectBrain
 ): RepositoryMetrics {
   const now = new Date().toISOString()
-
+  
   // Agrupación por carpetas
-  const folderMap = new Map<string, { files: number; lines: number }>()
+  const folderStats = new Map<string, { files: number; lines: number }>()
   
   // Agrupación por extensión
-  const languageMap = new Map<string, { files: number; lines: number }>()
+  const languageStats = new Map<string, { files: number; lines: number }>()
   
-  // Contadores para relaciones
-  const importedByCountMap = new Map<string, number>()
-  const importsCountMap = new Map<string, number>()
+  // Estadísticas de relaciones
+  const importedByCounts = new Map<string, number>()
+  const importsCounts = new Map<string, number>()
   
   // Entrypoints detectados
   const entrypoints: Array<{ path: string; reason: "filename" | "location" | "config" }> = []
-
+  
   // Procesar cada archivo
   for (const file of index.files) {
-    // Agrupación por carpetas
+    // Agregar a estadísticas de carpetas
     const folderPath = normalizeFolderPath(file.path)
-    if (folderPath) {
-      const folder = folderMap.get(folderPath) || { files: 0, lines: 0 }
-      folder.files++
-      folder.lines += file.lines
-      folderMap.set(folderPath, folder)
-    }
-
-    // Agrupación por extensión
-    const ext = getFileExtension(file.path)
-    if (ext) {
-      const lang = languageMap.get(ext) || { files: 0, lines: 0 }
-      lang.files++
-      lang.lines += file.lines
-      languageMap.set(ext, lang)
-    }
-
-    // Contar imports
-    const importsCount = file.relations.imports.length
-    if (importsCount > 0) {
-      importsCountMap.set(file.path, importsCount)
-    }
-
-    // Contar importedBy
-    const importedByCount = file.relations.importedBy.length
-    if (importedByCount > 0) {
-      importedByCountMap.set(file.path, importedByCount)
-    }
-
-    // Detectar entrypoints
-    const fileName = path.posix.basename(file.path)
+    const folderStat = folderStats.get(folderPath) || { files: 0, lines: 0 }
+    folderStat.files++
+    folderStat.lines += file.lines
+    folderStats.set(folderPath, folderStat)
     
-    if (isEntrypointByFilename(fileName)) {
+    // Agregar a estadísticas de lenguajes
+    const ext = getFileExtension(file.path)
+    const langStat = languageStats.get(ext) || { files: 0, lines: 0 }
+    langStat.files++
+    langStat.lines += file.lines
+    languageStats.set(ext, langStat)
+    
+    // Contar imports
+    const importedByCount = file.relations.importedBy?.length || 0
+    if (importedByCount > 0) {
+      importedByCounts.set(file.path, importedByCount)
+    }
+    
+    const importsCount = file.relations.imports?.length || 0
+    if (importsCount > 0) {
+      importsCounts.set(file.path, importsCount)
+    }
+    
+    // Detectar entrypoints
+    const entrypointDetection = detectEntrypoint(file.path)
+    if (entrypointDetection.isEntrypoint && entrypointDetection.reason) {
       entrypoints.push({
         path: file.path,
-        reason: "filename",
+        reason: entrypointDetection.reason,
       })
-    } else if (isEntrypointByLocation(file.path)) {
-      // Evitar duplicados si ya fue detectado por filename
-      if (!entrypoints.some((ep) => ep.path === file.path)) {
-        entrypoints.push({
-          path: file.path,
-          reason: "location",
-        })
-      }
     }
-    // Nota: "config" no se implementa en MVP según el plan
   }
-
-  // Convertir carpetas a array y filtrar (solo carpetas con al menos 2 archivos)
-  const folders = Array.from(folderMap.entries())
-    .filter(([, stats]) => stats.files >= 2)
-    .map(([folderPath, stats]) => ({
-      path: folderPath,
+  
+  // Convertir mapas a arrays y ordenar
+  const folders = Array.from(folderStats.entries())
+    .map(([path, stats]) => ({
+      path,
       files: stats.files,
       lines: stats.lines,
     }))
+    .filter((folder) => folder.files >= 2) // Solo carpetas con al menos 2 archivos
     .sort((a, b) => b.lines - a.lines) // Ordenar por líneas descendente
-
-  // Convertir lenguajes a array
-  const languages = Array.from(languageMap.entries())
+  
+  const languages = Array.from(languageStats.entries())
     .map(([ext, stats]) => ({
       ext,
       files: stats.files,
       lines: stats.lines,
     }))
     .sort((a, b) => b.lines - a.lines) // Ordenar por líneas descendente
-
-  // Generar rankings de relaciones (top 10)
-  const mostImported = Array.from(importedByCountMap.entries())
-    .map(([filePath, count]) => ({
-      path: filePath,
+  
+  // Top 10 archivos más importados
+  const mostImported = Array.from(importedByCounts.entries())
+    .map(([path, count]) => ({
+      path,
       importedByCount: count,
     }))
     .sort((a, b) => b.importedByCount - a.importedByCount)
     .slice(0, 10)
-
-  const mostImports = Array.from(importsCountMap.entries())
-    .map(([filePath, count]) => ({
-      path: filePath,
+  
+  // Top 10 archivos que más importan
+  const mostImports = Array.from(importsCounts.entries())
+    .map(([path, count]) => ({
+      path,
       importsCount: count,
     }))
     .sort((a, b) => b.importsCount - a.importsCount)
     .slice(0, 10)
-
+  
   return {
     version: 1,
     schema: "repository-metrics-mvp",
@@ -213,4 +179,3 @@ export function generateMetrics(
     entrypoints,
   }
 }
-

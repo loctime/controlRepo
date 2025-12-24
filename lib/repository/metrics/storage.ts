@@ -1,13 +1,12 @@
 /**
- * Interfaz de persistencia de Repository Metrics
+ * Interfaz de persistencia de métricas de repositorio
  * 
- * Las métricas pertenecen al repositorio, no a conversaciones individuales.
- * Se almacenan en storage interno de ControlRepo.
+ * Las métricas pertenecen al repositorio y se almacenan junto con el índice
  */
 
 import { RepositoryMetrics } from "@/lib/types/repository-metrics"
 
-export interface RepositoryMetricsStorage {
+export interface MetricsStorage {
   /**
    * Guarda o actualiza las métricas de un repositorio
    */
@@ -31,4 +30,3 @@ export interface RepositoryMetricsStorage {
 
 // Exportar implementación filesystem por defecto
 export * from "./storage-filesystem"
-

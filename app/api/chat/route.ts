@@ -4,6 +4,8 @@ import { searchFiles } from "@/lib/repository/search"
 import { IndexedFile } from "@/lib/types/repository"
 import { getSystemPrompt, DEFAULT_ROLE, type AssistantRole } from "@/lib/prompts/system-prompts"
 import { getProjectBrain } from "@/lib/project-brain/storage-filesystem"
+import { getMetrics } from "@/lib/repository/metrics/storage-filesystem"
+import { RepositoryMetrics } from "@/lib/types/repository-metrics"
 
 /**
  * Detecta si una pregunta es de intención social (saludos, confirmaciones, etc.)
@@ -359,6 +361,84 @@ function extractFindingsFromAnswer(answer: string): { improvements: string[]; ri
 }
 
 /**
+ * Formatea las métricas del repositorio como texto estructurado para incluir en el contexto
+ */
+function formatMetricsForContext(metrics: RepositoryMetrics | null): string {
+  if (!metrics) {
+    return ""
+  }
+
+  const parts: string[] = []
+  parts.push("MÉTRICAS DEL REPOSITORIO:")
+  parts.push(`Generadas: ${metrics.generatedAt}`)
+  parts.push(`Commit indexado: ${metrics.indexCommit}`)
+  parts.push("")
+
+  // Estructura general
+  parts.push("ESTRUCTURA:")
+  parts.push(`- Total de archivos: ${metrics.structure.totalFiles}`)
+  parts.push(`- Total de líneas: ${metrics.structure.totalLines}`)
+  parts.push("")
+
+  // Carpetas principales (top 10)
+  if (metrics.structure.folders.length > 0) {
+    parts.push("CARPETAS PRINCIPALES (por líneas):")
+    const topFolders = metrics.structure.folders
+      .sort((a, b) => b.lines - a.lines)
+      .slice(0, 10)
+    topFolders.forEach(folder => {
+      parts.push(`- ${folder.path}: ${folder.files} archivos, ${folder.lines} líneas`)
+    })
+    parts.push("")
+  }
+
+  // Lenguajes
+  if (metrics.languages.length > 0) {
+    parts.push("LENGUAJES:")
+    metrics.languages
+      .sort((a, b) => b.lines - a.lines)
+      .forEach(lang => {
+        parts.push(`- ${lang.ext}: ${lang.files} archivos, ${lang.lines} líneas`)
+      })
+    parts.push("")
+  }
+
+  // Archivos más importados (top 10)
+  if (metrics.relations.mostImported.length > 0) {
+    parts.push("ARCHIVOS MÁS IMPORTADOS (más dependencias):")
+    metrics.relations.mostImported.slice(0, 10).forEach(item => {
+      parts.push(`- ${item.path}: importado por ${item.importedByCount} archivos`)
+    })
+    parts.push("")
+  }
+
+  // Archivos que más importan (top 10)
+  if (metrics.relations.mostImports.length > 0) {
+    parts.push("ARCHIVOS QUE MÁS IMPORTAN (más dependencias externas):")
+    metrics.relations.mostImports.slice(0, 10).forEach(item => {
+      parts.push(`- ${item.path}: importa ${item.importsCount} archivos`)
+    })
+    parts.push("")
+  }
+
+  // Entrypoints
+  if (metrics.entrypoints.length > 0) {
+    parts.push("ENTRYPOINTS DETECTADOS:")
+    metrics.entrypoints.forEach(entrypoint => {
+      const reasonText = 
+        entrypoint.reason === "filename" ? "nombre de archivo" :
+        entrypoint.reason === "location" ? "ubicación" :
+        entrypoint.reason === "config" ? "configuración" :
+        entrypoint.reason
+      parts.push(`- ${entrypoint.path} (razón: ${reasonText})`)
+    })
+    parts.push("")
+  }
+
+  return parts.join("\n")
+}
+
+/**
  * POST /api/chat
  * Genera una respuesta usando Ollama (phi-3) basada en archivos relevantes del repositorio
  */
@@ -418,6 +498,9 @@ export async function POST(request: NextRequest) {
         { status: 409 }
       )
     }
+
+    // Cargar métricas (opcional)
+    const metrics = await getMetrics(repositoryId)
 
     // Buscar archivos relevantes usando searchFiles
     const query = question.trim()
@@ -517,9 +600,21 @@ Main Languages: ${mainLanguages}
 
 `
 
+    // Formatear métricas como texto estructurado
+    const metricsText = formatMetricsForContext(metrics)
+
     // Construir prompt usando el sistema de roles con memoria de conversación
-    // Inyectar Project Brain antes del contexto de archivos
-    const fullContext = projectBrainText + contextText
+    // Inyectar Project Brain y métricas antes del contexto de archivos
+    const fullContextParts: string[] = []
+    fullContextParts.push(projectBrainText)
+    
+    // Inyectar métricas si existen
+    if (metricsText) {
+      fullContextParts.push(metricsText)
+    }
+    
+    fullContextParts.push(contextText)
+    const fullContext = fullContextParts.join("\n")
     const prompt = getSystemPrompt(assistantRole, fullContext, query, conversationMemory || null)
 
     // Llamar a Ollama local

@@ -5,9 +5,10 @@ import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { FileText, Map, GitBranch, Code2, Package, Settings, BookOpen, TestTube, Wrench, Palette } from "lucide-react"
+import { FileText, Map, GitBranch, Code2, Package, Settings, BookOpen, TestTube, Wrench, Palette, BarChart3 } from "lucide-react"
 import { useRepository } from "@/lib/repository-context"
 import { FileCategory } from "@/lib/types/repository"
+import { RepositoryMetrics as RepositoryMetricsView } from "@/components/repository-metrics"
 
 // Iconos por categoría
 const categoryIcons: Record<FileCategory, typeof Code2> = {
@@ -97,7 +98,7 @@ export function SidebarPanel() {
       <Tabs defaultValue="architecture" className="h-full flex flex-col min-h-0">
         {/* Header fijo de tabs - NO scrollable */}
         <div className="border-b border-border px-3 pt-2 pb-2 shrink-0">
-          <TabsList className="w-full grid grid-cols-3 gap-2">
+          <TabsList className="w-full grid grid-cols-4 gap-2">
             <TabsTrigger value="architecture" className="flex items-center gap-2">
               <FileText className="h-4 w-4" />
               <span className="hidden md:inline">Arquitectura</span>
@@ -109,6 +110,10 @@ export function SidebarPanel() {
             <TabsTrigger value="flows" className="flex items-center gap-2">
               <GitBranch className="h-4 w-4" />
               <span className="hidden md:inline">Flujos</span>
+            </TabsTrigger>
+            <TabsTrigger value="metrics" className="flex items-center gap-2">
+              <BarChart3 className="h-4 w-4" />
+              <span className="hidden md:inline">Métricas</span>
             </TabsTrigger>
           </TabsList>
         </div>
@@ -425,6 +430,10 @@ export function SidebarPanel() {
                 </div>
               )}
             </div>
+          </TabsContent>
+
+          <TabsContent value="metrics" className="mt-0">
+            <RepositoryMetricsView />
           </TabsContent>
         </ScrollArea>
       </Tabs>

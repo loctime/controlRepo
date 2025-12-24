@@ -16,14 +16,13 @@ export async function GET(request: NextRequest) {
     // Validar parámetros
     if (!owner || !repo) {
       return NextResponse.json(
-        { error: "owner y repo son requeridos como query parameters" },
+        { error: "owner y repo son requeridos" },
         { status: 400 }
       )
     }
 
-    // Crear repositoryId (usar branch si está disponible, sino usar "main" como fallback)
-    const finalBranch = branch || "main"
-    const repositoryId = createRepositoryId(owner, repo, finalBranch)
+    // Crear repositoryId
+    const repositoryId = createRepositoryId(owner, repo, branch || "main")
 
     // Obtener métricas
     const metrics = await getMetrics(repositoryId)
@@ -35,7 +34,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    return NextResponse.json(metrics, { status: 200 })
+    return NextResponse.json(metrics)
   } catch (error) {
     console.error("Error en GET /api/repository/metrics:", error)
     return NextResponse.json(
@@ -46,4 +45,3 @@ export async function GET(request: NextRequest) {
     )
   }
 }
-

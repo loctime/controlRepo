@@ -1,12 +1,12 @@
 /**
- * Persistencia de Repository Metrics usando sistema de archivos
+ * Persistencia de métricas usando sistema de archivos
  * Usa el mismo directorio base que los índices de repositorio
  */
 
 import { RepositoryMetrics } from "@/lib/types/repository-metrics"
 import { writeFile, readFile, mkdir, unlink, rename } from "fs/promises"
 import { join } from "path"
-import { RepositoryMetricsStorage } from "./storage"
+import { MetricsStorage } from "./storage"
 
 // Usar el mismo directorio base que los índices de repositorio
 const STORAGE_DIR = join(process.cwd(), ".repository-indexes")
@@ -30,9 +30,9 @@ function normalizeRepositoryId(repositoryId: string): string {
 }
 
 /**
- * Implementación filesystem-based de RepositoryMetricsStorage
+ * Implementación filesystem-based de MetricsStorage
  */
-class FilesystemRepositoryMetricsStorage implements RepositoryMetricsStorage {
+class FilesystemMetricsStorage implements MetricsStorage {
   /**
    * Obtiene la ruta del directorio de métricas para un repositorio
    */
@@ -120,22 +120,21 @@ class FilesystemRepositoryMetricsStorage implements RepositoryMetricsStorage {
 }
 
 // Exportar instancia singleton
-export const filesystemRepositoryMetricsStorage = new FilesystemRepositoryMetricsStorage()
+export const filesystemMetricsStorage = new FilesystemMetricsStorage()
 
 // Exportar funciones de conveniencia que usan la instancia
 export async function saveMetrics(repositoryId: string, metrics: RepositoryMetrics): Promise<void> {
-  return filesystemRepositoryMetricsStorage.saveMetrics(repositoryId, metrics)
+  return filesystemMetricsStorage.saveMetrics(repositoryId, metrics)
 }
 
 export async function getMetrics(repositoryId: string): Promise<RepositoryMetrics | null> {
-  return filesystemRepositoryMetricsStorage.getMetrics(repositoryId)
+  return filesystemMetricsStorage.getMetrics(repositoryId)
 }
 
 export async function hasMetrics(repositoryId: string): Promise<boolean> {
-  return filesystemRepositoryMetricsStorage.hasMetrics(repositoryId)
+  return filesystemMetricsStorage.hasMetrics(repositoryId)
 }
 
 export async function deleteMetrics(repositoryId: string): Promise<void> {
-  return filesystemRepositoryMetricsStorage.deleteMetrics(repositoryId)
+  return filesystemMetricsStorage.deleteMetrics(repositoryId)
 }
-

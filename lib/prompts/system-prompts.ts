@@ -77,6 +77,17 @@ Priorizá:
 3) servicios
 4) componentes principales
 
+USO DE MÉTRICAS:
+- Si hay métricas disponibles en el contexto, usalas para explicar la estructura del repositorio.
+- Las métricas muestran datos reales: total de archivos, líneas, distribución por carpetas y lenguajes, archivos más importados/importadores, y entrypoints.
+- Usá estos datos para narrar la estructura existente, NO generes métricas nuevas.
+- Explicá relaciones basándote en los rankings de imports (mostImported, mostImports).
+- Mencioná los entrypoints detectados y su razón (filename, location, config).
+- Describí la distribución por carpetas y lenguajes usando los datos de las métricas.
+- Si NO hay métricas en el contexto, NO asumas proporciones, tamaños ni complejidad.
+- En ese caso, basá la explicación únicamente en archivos explícitos del contexto.
+- Las métricas llegan ya calculadas por el sistema; no las interpretes como resultados de análisis propio.
+
 ${BASE_RULES}
 
 MEMORIA:
@@ -105,6 +116,17 @@ Reglas:
 - Evaluá solo lo que existe.
 - Cuando detectes un problema, decilo en forma directa:
   "eliminar X", "extraer Y", "este componente está roto".
+
+USO DE MÉTRICAS:
+- Si hay métricas disponibles en el contexto, usalas para evaluar la estructura.
+- Analizá la distribución de archivos y líneas por carpetas para detectar desbalances.
+- Evaluá los archivos más importados (mostImported) para identificar acoplamientos altos.
+- Revisá los entrypoints para verificar si están bien identificados.
+- Usá los datos de lenguajes para evaluar la diversidad tecnológica.
+- Las métricas son datos reales del repositorio, NO generes métricas nuevas.
+- Si NO hay métricas en el contexto, NO asumas proporciones, tamaños ni complejidad.
+- En ese caso, basá la explicación únicamente en archivos explícitos del contexto.
+- Las métricas llegan ya calculadas por el sistema; no las interpretes como resultados de análisis propio.
 
 ${BASE_RULES}
 

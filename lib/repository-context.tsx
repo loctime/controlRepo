@@ -2,6 +2,8 @@
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from "react"
 import { RepositoryIndex, IndexedFile, FileCategory, FileType } from "./types/repository"
+import { RepositoryMetrics } from "./types/repository-metrics"
+import { parseRepositoryId } from "./repository/utils"
 import { searchFiles as searchFilesUtil } from "./repository/search"
 import { useAuth } from "./auth-context"
 
@@ -10,6 +12,7 @@ type RepositoryStatus = "idle" | "indexing" | "completed" | "error"
 interface RepositoryContextType {
   // Estado
   currentIndex: RepositoryIndex | null
+  currentMetrics: RepositoryMetrics | null
   status: RepositoryStatus
   loading: boolean
   error: string | null
@@ -34,6 +37,7 @@ const POLLING_INTERVAL = 4000 // 4 segundos (entre 3-5 segundos)
 
 export function RepositoryProvider({ children }: { children: React.ReactNode }) {
   const [currentIndex, setCurrentIndex] = useState<RepositoryIndex | null>(null)
+  const [currentMetrics, setCurrentMetrics] = useState<RepositoryMetrics | null>(null)
   const [status, setStatus] = useState<RepositoryStatus>("idle")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -62,6 +66,37 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
       }
     }
   }, [])
+
+  /**
+   * Carga las métricas del repositorio desde el API
+   */
+  const loadMetrics = useCallback(
+    async (owner: string, repo: string, branch: string = "main") => {
+      try {
+        const response = await fetch(
+          `/api/repository/metrics?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&branch=${encodeURIComponent(branch)}`
+        )
+
+        if (!response.ok) {
+          // Si no hay métricas (404), establecer a null y continuar sin error
+          if (response.status === 404) {
+            setCurrentMetrics(null)
+            return
+          }
+          throw new Error(`Error al obtener métricas: ${response.statusText}`)
+        }
+
+        const metrics = await response.json()
+        setCurrentMetrics(metrics as RepositoryMetrics)
+      } catch (err) {
+        console.error("Error al cargar métricas:", err)
+        // No establecer error global, solo loguear
+        // Las métricas son opcionales y no deberían bloquear el flujo
+        setCurrentMetrics(null)
+      }
+    },
+    []
+  )
 
   /**
    * Actualiza las preferencias del usuario con el repositorio activo
@@ -146,6 +181,13 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
               updateUserPreferences(index.id).catch((err) => {
                 console.error("Error al actualizar preferencias:", err)
               })
+              // Cargar métricas cuando el índice está completado
+              const parsed = parseRepositoryId(index.id)
+              if (parsed) {
+                loadMetrics(parsed.owner, parsed.repo, parsed.branch).catch((err) => {
+                  console.error("Error al cargar métricas:", err)
+                })
+              }
               stopPolling()
             } else if (index.status === "error") {
               setStatus("error")
@@ -163,10 +205,12 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
             if (partialResponse.status === "indexing") {
               // Está indexando pero el índice aún no existe
               setCurrentIndex(null)
+              setCurrentMetrics(null)
               setStatus("indexing")
             } else if (partialResponse.status === "not_found") {
               // No existe índice y tampoco está indexando
               setCurrentIndex(null)
+              setCurrentMetrics(null)
               setStatus("idle")
               stopPolling()
             }
@@ -185,7 +229,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         poll()
       }, POLLING_INTERVAL)
       },
-      [stopPolling, updateUserPreferences]
+      [stopPolling, updateUserPreferences, loadMetrics]
     )
 
   /**
@@ -197,6 +241,8 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
       setError(null)
       setStatus("indexing")
       setRepositoryId(`${owner}/${repo}`)
+      setCurrentIndex(null)
+      setCurrentMetrics(null)
 
       try {
         const response = await fetch("/api/repository/index", {
@@ -224,6 +270,8 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         setError(errorMessage)
         setStatus("error")
         setRepositoryId(null)
+        setCurrentIndex(null)
+        setCurrentMetrics(null)
         stopPolling()
       } finally {
         setLoading(false)
@@ -241,6 +289,8 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
       setError(null)
       setStatus("indexing")
       setRepositoryId(`${owner}/${repo}`)
+      setCurrentIndex(null)
+      setCurrentMetrics(null)
 
       try {
         const response = await fetch("/api/repository/reindex", {
@@ -268,6 +318,8 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         setError(errorMessage)
         setStatus("error")
         setRepositoryId(null)
+        setCurrentIndex(null)
+        setCurrentMetrics(null)
         stopPolling()
       } finally {
         setLoading(false)
@@ -314,6 +366,8 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
             setStatus("completed")
             // Actualizar preferencias cuando se restaura un repositorio completado
             await updateUserPreferences(index.id)
+            // Cargar métricas cuando el índice está completado
+            await loadMetrics(owner, repo, branch)
           } else {
             setStatus("error")
             setError("Error en el índice")
@@ -326,6 +380,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
           if (partialResponse.status === "indexing") {
             // Está indexando pero el índice aún no existe
             setCurrentIndex(null)
+            setCurrentMetrics(null)
             setStatus("indexing")
             // Actualizar preferencias aunque esté indexando
             await updateUserPreferences(partialResponse.repositoryId)
@@ -336,6 +391,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
           } else if (partialResponse.status === "not_found") {
             // No existe índice y tampoco está indexando
             setCurrentIndex(null)
+            setCurrentMetrics(null)
             setStatus("idle")
             // Limpiar preferencias si el repositorio no existe
             await updateUserPreferences(null)
@@ -345,11 +401,13 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         const errorMessage = err instanceof Error ? err.message : "Error desconocido al refrescar"
         setError(errorMessage)
         setStatus("error")
+        setCurrentIndex(null)
+        setCurrentMetrics(null)
       } finally {
         setLoading(false)
       }
     },
-    [startPolling, updateUserPreferences]
+    [startPolling, updateUserPreferences, loadMetrics]
   )
 
   /**
@@ -465,6 +523,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
   const value: RepositoryContextType = {
     currentIndex,
+    currentMetrics,
     status,
     loading,
     error,

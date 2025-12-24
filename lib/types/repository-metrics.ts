@@ -1,6 +1,6 @@
 /**
- * Tipos para el sistema de métricas de repositorio
- * Schema MVP - Versión 1
+ * Tipos para métricas de repositorio
+ * Schema MVP para análisis estructural y de relaciones
  */
 
 export interface RepositoryMetrics {
@@ -9,7 +9,7 @@ export interface RepositoryMetrics {
   schema: string // "repository-metrics-mvp"
   generatedAt: string // ISO 8601
   indexCommit: string // SHA del commit indexado
-
+  
   structure: {
     totalFiles: number
     totalLines: number
@@ -19,13 +19,13 @@ export interface RepositoryMetrics {
       lines: number
     }>
   }
-
+  
   languages: Array<{
     ext: string // ".ts", ".tsx", etc.
     files: number
     lines: number
   }>
-
+  
   relations: {
     mostImported: Array<{
       path: string
@@ -36,10 +36,9 @@ export interface RepositoryMetrics {
       importsCount: number // Cantidad de archivos que este archivo importa
     }>
   }
-
+  
   entrypoints: Array<{
     path: string
     reason: "filename" | "location" | "config" // Razón por la que fue detectado como entrypoint
   }>
 }
-
