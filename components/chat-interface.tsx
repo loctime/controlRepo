@@ -9,6 +9,7 @@ import { Send, Bot, User } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { ContextPanel } from "./context-panel"
 import { useRepository } from "@/lib/repository-context"
+import { useContextFiles } from "@/lib/context-files-context"
 
 interface Message {
   role: "user" | "assistant"
@@ -26,6 +27,7 @@ export function ChatInterface() {
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
   const { repositoryId } = useRepository()
+  const { setContextFiles } = useContextFiles()
 
   const handleSend = async () => {
     if (!input.trim()) return
@@ -49,8 +51,8 @@ export function ChatInterface() {
         return
       }
 
-      // Consultar el endpoint
-      const response = await fetch("/api/repository/query", {
+      // Consultar el endpoint de chat con Ollama
+      const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -64,26 +66,41 @@ export function ChatInterface() {
       const data = await response.json()
 
       if (!response.ok) {
-        // Error de la API
+        // Error de la API - limpiar archivos de contexto
+        setContextFiles([])
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant",
-            content: `Error: ${data.error || "Error desconocido al consultar el repositorio."}`,
+            content: `Error: ${data.error || data.details || "Error desconocido al generar la respuesta."}`,
           },
         ])
       } else {
-        // Respuesta exitosa
+        // Respuesta exitosa con respuesta generada por Ollama
         const fileCount = data.files?.length || 0
+        
+        // Guardar archivos en el contexto compartido
+        if (data.files && Array.isArray(data.files)) {
+          setContextFiles(data.files.map((file: { name: string; path: string }) => ({
+            name: file.name,
+            path: file.path,
+          })))
+        } else {
+          setContextFiles([])
+        }
+        
+        // Mostrar la respuesta generada por el modelo
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant",
-            content: `Encontré ${fileCount} archivo${fileCount !== 1 ? "s" : ""} relevante${fileCount !== 1 ? "s" : ""} en el repositorio.`,
+            content: data.answer || "No se pudo generar una respuesta.",
           },
         ])
       }
     } catch (error) {
+      // Error de red u otro error - limpiar archivos de contexto
+      setContextFiles([])
       setMessages((prev) => [
         ...prev,
         {

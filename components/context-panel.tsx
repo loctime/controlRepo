@@ -5,22 +5,24 @@ import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { FileCode, FileText, ChevronUp, ChevronDown } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { useContextFiles } from "@/lib/context-files-context"
 
-interface ContextFile {
-  name: string
-  path: string
-  type: "component" | "utility" | "config" | "docs"
+function getFileType(path: string): "component" | "utility" | "config" | "docs" {
+  if (path.endsWith(".md") || path.includes("docs/") || path.includes("README")) {
+    return "docs"
+  }
+  if (path.includes("components/") || path.endsWith(".tsx") || path.endsWith(".jsx")) {
+    return "component"
+  }
+  if (path.includes("config") || path.includes(".config.") || path.includes(".json")) {
+    return "config"
+  }
+  return "utility"
 }
-
-const sampleFiles: ContextFile[] = [
-  { name: "README.md", path: "/docs/README.md", type: "docs" },
-  { name: "auth.ts", path: "/lib/auth.ts", type: "utility" },
-  { name: "UserProfile.tsx", path: "/components/UserProfile.tsx", type: "component" },
-  { name: "next.config.js", path: "/next.config.js", type: "config" },
-]
 
 export function ContextPanel({ compact }: { compact?: boolean }) {
   const [open, setOpen] = useState(false)
+  const { contextFiles } = useContextFiles()
 
   return (
     <div className="relative inline-block">
@@ -52,29 +54,38 @@ export function ContextPanel({ compact }: { compact?: boolean }) {
             </div>
             <div className="max-h-[45vh]">
               <ScrollArea className="p-3">
-                <div className="space-y-3">
-                  {sampleFiles.map((file, index) => (
-                    <div
-                      key={index}
-                      className="flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition-colors"
-                    >
-                      <div className="mt-0.5">
-                        {file.type === "docs" ? (
-                          <FileText className="h-4 w-4 text-muted-foreground" />
-                        ) : (
-                          <FileCode className="h-4 w-4 text-muted-foreground" />
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-foreground truncate">{file.name}</p>
-                        <p className="text-xs text-muted-foreground truncate mt-0.5">{file.path}</p>
-                      </div>
-                      <Badge variant="secondary" className="text-xs shrink-0">
-                        {file.type}
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
+                {contextFiles.length === 0 ? (
+                  <div className="py-8 text-center">
+                    <p className="text-sm text-muted-foreground">No hay archivos de contexto</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {contextFiles.map((file, index) => {
+                      const fileType = getFileType(file.path)
+                      return (
+                        <div
+                          key={index}
+                          className="flex items-start gap-3 p-3 rounded-lg border border-border hover:bg-accent transition-colors"
+                        >
+                          <div className="mt-0.5">
+                            {fileType === "docs" ? (
+                              <FileText className="h-4 w-4 text-muted-foreground" />
+                            ) : (
+                              <FileCode className="h-4 w-4 text-muted-foreground" />
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-foreground truncate">{file.name}</p>
+                            <p className="text-xs text-muted-foreground truncate mt-0.5">{file.path}</p>
+                          </div>
+                          <Badge variant="secondary" className="text-xs shrink-0">
+                            {fileType}
+                          </Badge>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </ScrollArea>
             </div>
           </Card>

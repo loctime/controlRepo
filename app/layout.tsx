@@ -5,6 +5,7 @@ import { Analytics } from "@vercel/analytics/next"
 import { ThemeProvider } from "@/components/theme-provider"
 import { AuthProvider } from "@/lib/auth-context"
 import { RepositoryProvider } from "@/lib/repository-context"
+import { ContextFilesProvider } from "@/lib/context-files-context"
 import { AuthWrapper } from "@/components/auth-wrapper"
 import "./globals.css"
 
@@ -45,7 +46,9 @@ export default function RootLayout({
         <ThemeProvider defaultTheme="system" storageKey="repo-wiki-theme">
           <AuthProvider>
             <RepositoryProvider>
-              <AuthWrapper>{children}</AuthWrapper>
+              <ContextFilesProvider>
+                <AuthWrapper>{children}</AuthWrapper>
+              </ContextFilesProvider>
             </RepositoryProvider>
           </AuthProvider>
         </ThemeProvider>
