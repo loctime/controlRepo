@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from "react"
 import { RepositoryIndex, IndexedFile, FileCategory, FileType } from "./types/repository"
 import { searchFiles as searchFilesUtil } from "./repository/search"
+import { useAuth } from "./auth-context"
 
 type RepositoryStatus = "idle" | "indexing" | "completed" | "error"
 
@@ -37,6 +38,8 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [repositoryId, setRepositoryId] = useState<string | null>(null)
+  const { user } = useAuth()
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false)
 
   // Ref para almacenar información del polling
   const pollingRef = useRef<{
@@ -59,6 +62,37 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
       }
     }
   }, [])
+
+  /**
+   * Actualiza las preferencias del usuario con el repositorio activo
+   */
+  const updateUserPreferences = useCallback(
+    async (activeRepositoryId: string | null) => {
+      if (!user?.uid) return
+
+      try {
+        await fetch("/api/user/preferences", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            userId: user.uid,
+            activeRepositoryId,
+          }),
+        })
+      } catch (err) {
+        console.error("Error al actualizar preferencias de usuario:", err)
+        // No bloquear el flujo si falla la actualización de preferencias
+      }
+    },
+    [user?.uid]
+  )
+
+  // Resetear preferencesLoaded cuando el usuario cambia
+  useEffect(() => {
+    setPreferencesLoaded(false)
+  }, [user?.uid])
 
   /**
    * Detiene el polling activo
@@ -108,6 +142,10 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
             // Si el estado del índice cambió a "completed" o "error", detener polling
             if (index.status === "completed") {
               setStatus("completed")
+              // Actualizar preferencias cuando se completa la indexación
+              updateUserPreferences(index.id).catch((err) => {
+                console.error("Error al actualizar preferencias:", err)
+              })
               stopPolling()
             } else if (index.status === "error") {
               setStatus("error")
@@ -146,9 +184,9 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
       pollingRef.current.intervalId = setInterval(() => {
         poll()
       }, POLLING_INTERVAL)
-    },
-    [stopPolling]
-  )
+      },
+      [stopPolling, updateUserPreferences]
+    )
 
   /**
    * Indexa un repositorio completo
@@ -176,6 +214,9 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
         const data = await response.json()
 
+        // Actualizar preferencias del usuario
+        await updateUserPreferences(`${owner}/${repo}`)
+
         // Iniciar polling automático
         startPolling(owner, repo, branch)
       } catch (err) {
@@ -188,7 +229,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         setLoading(false)
       }
     },
-    [startPolling, stopPolling]
+    [startPolling, stopPolling, updateUserPreferences]
   )
 
   /**
@@ -217,6 +258,9 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
         const data = await response.json()
 
+        // Actualizar preferencias del usuario
+        await updateUserPreferences(`${owner}/${repo}`)
+
         // Iniciar polling automático
         startPolling(owner, repo, branch)
       } catch (err) {
@@ -229,7 +273,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         setLoading(false)
       }
     },
-    [startPolling, stopPolling]
+    [startPolling, stopPolling, updateUserPreferences]
   )
 
   /**
@@ -268,6 +312,8 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
             }
           } else if (index.status === "completed") {
             setStatus("completed")
+            // Actualizar preferencias cuando se restaura un repositorio completado
+            await updateUserPreferences(index.id)
           } else {
             setStatus("error")
             setError("Error en el índice")
@@ -281,6 +327,8 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
             // Está indexando pero el índice aún no existe
             setCurrentIndex(null)
             setStatus("indexing")
+            // Actualizar preferencias aunque esté indexando
+            await updateUserPreferences(partialResponse.repositoryId)
             // Iniciar polling (solo si no hay uno activo)
             if (!pollingRef.current.intervalId) {
               startPolling(owner, repo, branch)
@@ -289,6 +337,8 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
             // No existe índice y tampoco está indexando
             setCurrentIndex(null)
             setStatus("idle")
+            // Limpiar preferencias si el repositorio no existe
+            await updateUserPreferences(null)
           }
         }
       } catch (err) {
@@ -299,8 +349,43 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         setLoading(false)
       }
     },
-    [startPolling]
+    [startPolling, updateUserPreferences]
   )
+
+  /**
+   * Restaura el repositorio activo desde las preferencias del usuario
+   */
+  useEffect(() => {
+    if (!user?.uid || preferencesLoaded) return
+
+    const restoreActiveRepository = async () => {
+      try {
+        const response = await fetch(`/api/user/preferences?userId=${encodeURIComponent(user.uid)}`)
+        if (!response.ok) {
+          console.error("Error al obtener preferencias de usuario")
+          setPreferencesLoaded(true)
+          return
+        }
+
+        const preferences = await response.json()
+        if (preferences.activeRepositoryId) {
+          // Parsear repositoryId (formato: "owner/repo")
+          const [owner, repo] = preferences.activeRepositoryId.split("/")
+          if (owner && repo) {
+            // Restaurar el repositorio usando refreshStatus
+            // Esto cargará el índice completo si existe
+            await refreshStatus(owner, repo)
+          }
+        }
+      } catch (err) {
+        console.error("Error al restaurar repositorio activo:", err)
+      } finally {
+        setPreferencesLoaded(true)
+      }
+    }
+
+    restoreActiveRepository()
+  }, [user?.uid, preferencesLoaded, refreshStatus])
 
   // Helpers de solo lectura (trabajan exclusivamente con currentIndex)
 
