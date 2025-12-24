@@ -5,12 +5,79 @@ import { IndexedFile } from "@/lib/types/repository"
 import { getSystemPrompt, DEFAULT_ROLE, type AssistantRole } from "@/lib/prompts/system-prompts"
 
 /**
+ * Detecta si una pregunta es de intención social (saludos, confirmaciones, etc.)
+ */
+function isSocialIntent(question: string): boolean {
+  const socialPatterns = [
+    /^(hola|hi|buenos\s+d[ií]as|buenas\s+tardes|buenas\s+noches)/i,
+    /^(ok|okay|dale|entendido|perfecto|gracias|thanks|seguimos|continuamos)/i,
+    /^(s[ií]|no|claro|exacto|correcto|bien|genial)$/i,
+    /^(chau|adi[óo]s|hasta\s+luego|nos\s+vemos)/i,
+    /^(c[óo]mo\s+est[áa]s|todo\s+bien)/i,
+  ]
+  
+  const trimmed = question.trim().toLowerCase()
+  
+  // Si coincide con patrones sociales
+  if (socialPatterns.some(pattern => pattern.test(trimmed))) {
+    return true
+  }
+  
+  // Si es corto (menos de 20 caracteres) y no tiene signo de interrogación, tratarlo como social
+  if (trimmed.length < 20 && !trimmed.includes('?')) {
+    return true
+  }
+  
+  return false
+}
+
+/**
+ * Detecta si una respuesta es social (no tiene formato técnico)
+ */
+function isSocialResponse(answer: string): boolean {
+  // Si no tiene bloques técnicos y es corta, probablemente es social
+  const hasTechnicalFormat = /Fuentes\s*:?\s*\n?/i.test(answer) || 
+                             /Respuesta\s*:?\s*\n?/i.test(answer) ||
+                             /Mejoras\s*\/\s*Riesgos/i.test(answer)
+  
+  // Si es muy corta (menos de 100 caracteres) y no tiene formato técnico, es social
+  if (!hasTechnicalFormat && answer.trim().length < 100) {
+    return true
+  }
+  
+  return false
+}
+
+/**
  * Limpia la respuesta del asistente eliminando razonamiento interno, intenciones detectadas y metadata de debug
  */
 function cleanAnswerFromInternalReasoning(answer: string): string {
   let cleaned = answer
   
-  // Eliminar bloques de razonamiento interno comunes
+  // Detectar si hay sección "No confirmado" - en ese caso, preservar contenido dentro de ella
+  const noConfirmadoIndex = cleaned.search(/⚠️\s*No\s+confirmado\s+en\s+el\s+repositorio/i)
+  const hasNoConfirmadoSection = noConfirmadoIndex !== -1
+  
+  // Dividir en partes: antes de "No confirmado" y después
+  let beforeNoConfirmado = cleaned
+  let noConfirmadoSection = ''
+  let afterNoConfirmado = ''
+  
+  if (hasNoConfirmadoSection) {
+    beforeNoConfirmado = cleaned.substring(0, noConfirmadoIndex)
+    const rest = cleaned.substring(noConfirmadoIndex)
+    // Encontrar dónde termina la sección "No confirmado" (siguiente sección o fin)
+    const nextSectionMatch = rest.match(/\n(?:Mejoras|Falta|Preguntas|$)/i)
+    if (nextSectionMatch && nextSectionMatch.index !== undefined) {
+      noConfirmadoSection = rest.substring(0, nextSectionMatch.index)
+      afterNoConfirmado = rest.substring(nextSectionMatch.index)
+    } else {
+      noConfirmadoSection = rest
+    }
+  }
+  
+  // Eliminar razonamiento interno solo ANTES de secciones estructuradas
+  // No eliminar dentro de "No confirmado" porque ahí es válido
   const reasoningPatterns = [
     /Intención\s+(?:de\s+la\s+)?pregunta[^\n]*:?\s*\n?[^\n]*\n?/gi,
     /Intención\s+detectada[^\n]*:?\s*\n?[^\n]*\n?/gi,
@@ -18,28 +85,46 @@ function cleanAnswerFromInternalReasoning(answer: string): string {
     /Análisis\s+de\s+la\s+pregunta[^\n]*:?\s*\n?[^\n]*\n?/gi,
     /Detectando\s+intención[^\n]*:?\s*\n?[^\n]*\n?/gi,
     /Basándome\s+en\s+el\s+contexto[^\n]*:?\s*\n?[^\n]*\n?/gi,
-    /Parece\s+que\s+la\s+pregunta[^\n]*:?\s*\n?[^\n]*\n?/gi,
-    /La\s+pregunta\s+parece\s+referirse\s+a[^\n]*:?\s*\n?[^\n]*\n?/gi,
   ]
   
+  // Solo limpiar la parte antes de "No confirmado"
   reasoningPatterns.forEach(pattern => {
-    cleaned = cleaned.replace(pattern, '')
+    beforeNoConfirmado = beforeNoConfirmado.replace(pattern, '')
   })
   
-  // Eliminar líneas que contengan lenguaje especulativo al inicio
-  const lines = cleaned.split('\n')
-  const filteredLines = lines.filter(line => {
+  // Eliminar lenguaje especulativo solo si está ANTES de una sección estructurada
+  // No eliminar si está dentro de "No confirmado" o después de secciones estructuradas
+  const lines = beforeNoConfirmado.split('\n')
+  const filteredLines: string[] = []
+  let foundStructuredSection = false
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
     const trimmed = line.trim()
-    // Eliminar líneas que empiezan con lenguaje especulativo
-    if (/^(Parece|Probablemente|Posiblemente|Tal vez|Quizás|Es probable que|Es posible que)/i.test(trimmed)) {
-      return false
+    
+    // Si encontramos una sección estructurada, marcar y preservar todo después
+    if (/^(Fuentes|Respuesta|Mejoras|Falta|⚠️)/i.test(trimmed)) {
+      foundStructuredSection = true
     }
-    return true
-  })
+    
+    // Solo eliminar lenguaje especulativo si NO hemos encontrado sección estructurada
+    if (!foundStructuredSection && /^(Parece|Probablemente|Posiblemente|Tal vez|Quizás|Es probable que|Es posible que)/i.test(trimmed)) {
+      continue // Saltar esta línea
+    }
+    
+    filteredLines.push(line)
+  }
   
-  cleaned = filteredLines.join('\n').trim()
+  beforeNoConfirmado = filteredLines.join('\n').trim()
   
-  return cleaned
+  // Reconstruir respuesta preservando sección "No confirmado"
+  if (hasNoConfirmadoSection) {
+    cleaned = beforeNoConfirmado + noConfirmadoSection + afterNoConfirmado
+  } else {
+    cleaned = beforeNoConfirmado
+  }
+  
+  return cleaned.trim()
 }
 
 /**
@@ -61,7 +146,12 @@ function validateSourceExists(sourcePath: string, indexFiles: IndexedFile[]): bo
 /**
  * Fuerza el formato de salida estándar en la respuesta
  */
-function enforceOutputFormat(answer: string): string {
+function enforceOutputFormat(answer: string, isSocial: boolean = false): string {
+  // Si es una respuesta social, NO aplicar formato técnico
+  if (isSocial || isSocialResponse(answer)) {
+    return answer.trim()
+  }
+  
   // Verificar si ya tiene el formato correcto
   const hasSources = /Fuentes\s*\([^)]*\)\s*:?\s*\n?/i.test(answer)
   const hasRespuesta = /Respuesta\s*:?\s*\n?/i.test(answer)
@@ -71,11 +161,29 @@ function enforceOutputFormat(answer: string): string {
     return answer
   }
   
-  // Si no tiene formato, intentar estructurarlo
-  // Primero buscar si hay contenido útil
   const trimmed = answer.trim()
   if (!trimmed) {
     return "Fuentes:\nRespuesta:\nMejoras / Riesgos:\nFalta contexto:"
+  }
+  
+  // SOLO forzar formato si:
+  // - no es social
+  // - y el texto tiene más de 200 caracteres
+  // - y parece una respuesta técnica (contiene rutas, extensiones, términos técnicos)
+  const isTechnicalAnswer = trimmed.length > 200 && (
+    trimmed.includes('/') || 
+    trimmed.includes('.ts') || 
+    trimmed.includes('.js') ||
+    trimmed.includes('config') ||
+    trimmed.includes('archivo') ||
+    trimmed.includes('componente') ||
+    trimmed.includes('función') ||
+    trimmed.includes('módulo')
+  )
+  
+  // Si es corta y no parece técnica, dejarla vivir sin forzar formato
+  if (!isTechnicalAnswer) {
+    return trimmed
   }
   
   // Intentar extraer contenido y estructurarlo
@@ -301,27 +409,51 @@ export async function POST(request: NextRequest) {
 
     // Buscar archivos relevantes usando searchFiles
     const query = question.trim()
-    const relevantFiles = searchFiles(index.files, query)
+    
+    // Detectar si es intención social
+    const isSocial = isSocialIntent(query)
+    
+    let relevantFiles = searchFiles(index.files, query)
+
+    // Si no hay archivos relevantes, buscar archivos de documentación por defecto
+    // para preguntas generales o exploratorias
+    if (relevantFiles.length === 0) {
+      // Detectar si la pregunta es general/exploratoria
+      const isGeneralQuestion = /^(de\s+qu[ée]|qu[ée]\s+es|qu[ée]\s+hace|sobre\s+qu[ée]|acerca\s+de|qu[ée]\s+trata|objetivo|prop[óo]sito|para\s+qu[ée])/i.test(query)
+      
+      if (isGeneralQuestion) {
+        // Buscar archivos de documentación clave
+        const docFiles = index.files.filter((file: IndexedFile) => 
+          file.isDocumentation || 
+          file.isKeyFile || 
+          file.name.toLowerCase() === 'readme.md' ||
+          file.path.toLowerCase().includes('/docs/') ||
+          file.category === 'docs'
+        )
+        
+        // Priorizar README y docs principales
+        const readme = docFiles.find((f: IndexedFile) => f.name.toLowerCase() === 'readme.md')
+        const docs = docFiles.filter((f: IndexedFile) => 
+          f.path.toLowerCase().includes('/docs/') && f.name.endsWith('.md')
+        ).slice(0, 5) // Máximo 5 archivos de docs
+        
+        relevantFiles = []
+        if (readme) relevantFiles.push(readme)
+        relevantFiles.push(...docs)
+        
+        // Si aún no hay archivos, incluir cualquier archivo de documentación
+        if (relevantFiles.length === 0 && docFiles.length > 0) {
+          relevantFiles = docFiles.slice(0, 5)
+        }
+      }
+    }
 
     // Construir contexto de texto con metadata de los archivos
     const contextParts: string[] = []
 
-    if (relevantFiles.length === 0) {
-      // Si no hay archivos relevantes, rechazar explícitamente sin inferencias
-      return NextResponse.json({
-        answer: "Fuentes:\n\nRespuesta:\nNo hay evidencia en el repositorio para responder esta pregunta.\n\nMejoras / Riesgos:\n\nFalta contexto:",
-        files: [],
-        sourcesDeclared: false,
-        findings: {
-          improvements: [],
-          risks: [],
-        },
-        debug: {
-          model: "phi3:mini",
-          contextFiles: 0,
-        },
-      })
-    }
+    // Si después de buscar documentación aún no hay archivos, permitir que el modelo
+    // use el modo conversacional (no rechazar inmediatamente)
+    // El modelo decidirá si puede responder o no usando el modo conversacional controlado
 
     // Construir contexto con metadata de cada archivo relevante
     relevantFiles.forEach((file: IndexedFile, index: number) => {
@@ -401,6 +533,28 @@ export async function POST(request: NextRequest) {
     // Extraer respuesta del modelo
     const rawAnswer = ollamaResponse.response || ollamaResponse.text || "No se pudo generar una respuesta."
     
+    // Si es intención social, procesar de forma simplificada
+    if (isSocial) {
+      const cleanedAnswer = cleanAnswerFromInternalReasoning(rawAnswer)
+      const formattedAnswer = enforceOutputFormat(cleanedAnswer.trim(), true)
+      
+      return NextResponse.json({
+        answer: formattedAnswer,
+        files: [],
+        sourcesDeclared: false,
+        findings: {
+          improvements: [],
+          risks: [],
+        },
+        debug: {
+          model: "phi3:mini",
+          contextFiles: 0,
+          role: assistantRole,
+          isSocial: true,
+        },
+      })
+    }
+    
     // Limpiar razonamiento interno y metadata de debug
     const cleanedAnswer = cleanAnswerFromInternalReasoning(rawAnswer)
     
@@ -435,7 +589,7 @@ export async function POST(request: NextRequest) {
     })
     
     // Forzar formato de salida estándar
-    const formattedAnswer = enforceOutputFormat(finalAnswer.trim())
+    const formattedAnswer = enforceOutputFormat(finalAnswer.trim(), false)
     
     // Extraer hallazgos clave (mejoras y riesgos) de la respuesta formateada
     const findings = extractFindingsFromAnswer(formattedAnswer)
