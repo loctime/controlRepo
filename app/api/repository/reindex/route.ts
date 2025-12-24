@@ -4,6 +4,10 @@ import { saveRepositoryIndex, acquireIndexLock, releaseIndexLock, getRepositoryI
 import { IndexResponse } from "@/lib/types/repository"
 import { resolveRepositoryBranch } from "@/lib/github/client"
 import { createRepositoryId } from "@/lib/repository/utils"
+import { generateMinimalProjectBrain } from "@/lib/project-brain/generator"
+import { saveProjectBrain } from "@/lib/project-brain/storage-filesystem"
+import { generateMetrics } from "@/lib/repository/metrics/generator"
+import { saveMetrics } from "@/lib/repository/metrics/storage-filesystem"
 
 /**
  * POST /api/repository/reindex
@@ -136,6 +140,17 @@ export async function POST(request: NextRequest) {
           updatedIndex.status = "completed"
           await saveRepositoryIndex(updatedIndex)
           console.log(`[INDEX] Re-indexing completed for ${repositoryId} (${updatedIndex.files.length} files)`)
+          
+          // Generar Project Brain (siempre regenerar en reindex)
+          const projectBrain = generateMinimalProjectBrain(updatedIndex)
+          await saveProjectBrain(projectBrain)
+          console.log(`[INDEX] Project Brain regenerated for ${repositoryId}`)
+          
+          // Generar y guardar métricas
+          const metrics = generateMetrics(updatedIndex, projectBrain)
+          await saveMetrics(repositoryId, metrics)
+          console.log(`[INDEX] Metrics regenerated for ${repositoryId}`)
+          
           // Liberar lock
           await releaseIndexLock(repositoryId)
         })

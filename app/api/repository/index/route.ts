@@ -6,6 +6,8 @@ import { getRepositoryMetadata, resolveRepositoryBranch } from "@/lib/github/cli
 import { generateMinimalProjectBrain } from "@/lib/project-brain/generator"
 import { saveProjectBrain, hasProjectBrain } from "@/lib/project-brain/storage-filesystem"
 import { createRepositoryId } from "@/lib/repository/utils"
+import { generateMetrics } from "@/lib/repository/metrics/generator"
+import { saveMetrics } from "@/lib/repository/metrics/storage-filesystem"
 
 /**
  * POST /api/repository/index
@@ -130,11 +132,17 @@ export async function POST(request: NextRequest) {
           
           // Crear Project Brain solo si no existe
           const brainExists = await hasProjectBrain(repositoryId)
+          let projectBrain = undefined
           if (!brainExists) {
-            const projectBrain = generateMinimalProjectBrain(updatedIndex)
+            projectBrain = generateMinimalProjectBrain(updatedIndex)
             await saveProjectBrain(projectBrain)
             console.log(`[INDEX] Project Brain created for ${repositoryId}`)
           }
+          
+          // Generar y guardar métricas
+          const metrics = generateMetrics(updatedIndex, projectBrain)
+          await saveMetrics(repositoryId, metrics)
+          console.log(`[INDEX] Metrics generated for ${repositoryId}`)
           
           // Liberar lock
           await releaseIndexLock(repositoryId)
