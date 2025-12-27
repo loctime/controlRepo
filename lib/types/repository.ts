@@ -36,6 +36,20 @@ export type FileType =
   | "other"
 
 export type IndexStatus = "indexing" | "completed" | "error"
+export type FileProcessRole =
+  | "entrypoint"
+  | "orchestrator"
+  | "worker"
+  | "utility"
+  | "config"
+  | "unknown"
+
+export interface FileProcessInfo {
+  role: FileProcessRole
+  entrypoint: boolean
+  actions: string[]
+  callsApi: string[]
+}
 
 export interface IndexedFile {
   // Identificación
@@ -78,6 +92,9 @@ export interface IndexedFile {
   isKeyFile: boolean // true si es archivo clave (README, package.json, etc.)
   isDocumentation: boolean // true si es documentación
   lastModified?: string // Fecha de última modificación (si disponible)
+  // Análisis de procesos (flows, comportamiento)
+  process?: FileProcessInfo
+
 }
 
 export interface RepositoryMetadata {

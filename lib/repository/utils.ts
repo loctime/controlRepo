@@ -4,37 +4,38 @@
 
 /**
  * Genera un repositoryId único que incluye owner, repo y branch
- * Formato: "owner/repo#branch"
- * 
- * Esto evita colisiones cuando se indexan múltiples ramas del mismo repositorio
+ * Formato CANÓNICO: "owner/repo/branch"
  */
-export function createRepositoryId(owner: string, repo: string, branch: string): string {
-  return `${owner}/${repo}#${branch}`
+export function createRepositoryId(
+  owner: string,
+  repo: string,
+  branch: string
+): string {
+  return `${owner}/${repo}/${branch}`
 }
 
 /**
  * Normaliza un repositoryId para usar como nombre de archivo
- * Reemplaza caracteres especiales que no son válidos en nombres de archivo
+ * Ej: loctime/controlauditv2/main → loctime_controlauditv2_main
  */
-export function normalizeRepositoryIdForFile(repositoryId: string): string {
-  return repositoryId.replace(/\//g, "_").replace(/#/g, "_")
+export function normalizeRepositoryIdForFile(
+  repositoryId: string
+): string {
+  return repositoryId.replace(/\//g, "_")
 }
 
 /**
  * Parsea un repositoryId en sus componentes
- * Retorna null si el formato es inválido
+ * Formato esperado: owner/repo/branch
  */
-export function parseRepositoryId(repositoryId: string): { owner: string; repo: string; branch: string } | null {
-  const match = repositoryId.match(/^(.+?)\/(.+?)#(.+)$/)
-  if (!match) {
-    return null
-  }
-  return {
-    owner: match[1],
-    repo: match[2],
-    branch: match[3],
-  }
+export function parseRepositoryId(
+  repositoryId: string
+): { owner: string; repo: string; branch: string } | null {
+  const parts = repositoryId.split("/")
+  if (parts.length !== 3) return null
+
+  const [owner, repo, branch] = parts
+  if (!owner || !repo || !branch) return null
+
+  return { owner, repo, branch }
 }
-
-
-

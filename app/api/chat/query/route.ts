@@ -3,59 +3,38 @@ import { NextRequest, NextResponse } from "next/server"
 import { analyzeQuestion } from "@/lib/chat/step1-question-analysis"
 import { selectJsonSources } from "@/lib/chat/step2-select-json-sources"
 import { loadAndFilterJsonSources } from "@/lib/chat/step3-load-and-filter-json"
-import { loadRepoFiles } from "@/lib/chat/step4-select-and-load-repo-files"
+import { selectFilesFromIndex } from "@/lib/chat/step4-select-files-from-index"
 import { generateAnswer } from "@/lib/chat/step5-generate-answer"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-/* -------------------------------------------
- * POST /api/chat/query
- * ------------------------------------------- */
-
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
 
-    const {
-      question,
-      repositoryId,
-      repositoryPath, // path local al repo clonado
-    } = body
+    const { question, repositoryId } = body
 
     /* ---------------------------
-     * Validaciones mínimas
+     * Validaciones
      * --------------------------- */
 
     if (!question || typeof question !== "string") {
-      return NextResponse.json(
-        { error: "question es requerido" },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: "question es requerido" }, { status: 400 })
     }
 
     if (!repositoryId || typeof repositoryId !== "string") {
-      return NextResponse.json(
-        { error: "repositoryId es requerido" },
-        { status: 400 }
-      )
-    }
-
-    if (!repositoryPath || typeof repositoryPath !== "string") {
-      return NextResponse.json(
-        { error: "repositoryPath es requerido" },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: "repositoryId es requerido" }, { status: 400 })
     }
 
     /* ---------------------------
-     * PASO 1 – Análisis de pregunta
+     * PASO 1 – Analizar pregunta
      * --------------------------- */
 
     const analysis = analyzeQuestion(question)
 
     /* ---------------------------
-     * PASO 2 – Selección de JSON
+     * PASO 2 – Seleccionar JSON
      * --------------------------- */
 
     const jsonSelection = selectJsonSources(analysis.signals)
@@ -71,19 +50,15 @@ export async function POST(req: NextRequest) {
     )
 
     /* ---------------------------
-     * PASO 4 – Cargar archivos del repo (si hace falta)
+     * PASO 4 – Seleccionar archivos DESDE EL ÍNDICE
      * --------------------------- */
 
-    let repoFiles
-
-    if (!jsonContext.sufficient) {
-      repoFiles = await loadRepoFiles(
-        repositoryPath,
-        analysis,
-        jsonContext,
-        { maxFiles: 5 }
-      )
-    }
+    const repoFiles = selectFilesFromIndex(
+      repositoryId,
+      analysis,
+      jsonContext,
+      { maxFiles: 5 }
+    )
 
     /* ---------------------------
      * PASO 5 – Generar respuesta
@@ -94,10 +69,6 @@ export async function POST(req: NextRequest) {
       jsonContext,
       repoFiles
     )
-
-    /* ---------------------------
-     * Respuesta final
-     * --------------------------- */
 
     return NextResponse.json({
       success: true,
@@ -114,10 +85,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Error desconocido",
+        error: error instanceof Error ? error.message : "Error desconocido",
       },
       { status: 500 }
     )

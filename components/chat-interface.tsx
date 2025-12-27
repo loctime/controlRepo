@@ -17,24 +17,22 @@ interface Message {
   content: string
 }
 
-export function ChatInterface() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      content:
-        "Soy el asistente del repositorio. Puedo responder solo con información verificable del proyecto.",
-    },
-  ])
+/* -------------------------------------------
+ * Helper: parse repositoryId
+ * ------------------------------------------- */
+function parseRepositoryId(repositoryId: string) {
+  const [fullRepo, branch = "main"] = repositoryId.split("#")
+  const [owner, repo] = fullRepo.split("/")
+  return { owner, repo, branch }
+}
 
+export function ChatInterface() {
+  const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
 
   const { repositoryId } = useRepository()
-
-  const repositoryPath = repositoryId
-    ? `/repos/${repositoryId.split("#")[0]}`
-    : null
-    const { setContextFiles } = useContextFiles()
+  const { setContextFiles } = useContextFiles()
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -57,6 +55,65 @@ export function ChatInterface() {
   }, [input])
 
   /* -------------------------------------------
+   * Mensaje inicial: resumen del repositorio
+   * ------------------------------------------- */
+  useEffect(() => {
+    if (!repositoryId) return
+
+    const loadRepositorySummary = async () => {
+      try {
+        const { owner, repo, branch } = parseRepositoryId(repositoryId)
+
+        const res = await fetch(
+          `/api/repository/status?owner=${owner}&repo=${repo}&branch=${branch}`
+        )
+
+        if (!res.ok) return
+        const data = await res.json()
+
+        const lines: string[] = []
+
+        lines.push(`Repositorio cargado: ${data.repositoryId}`)
+        if (data.commit) lines.push(`Commit indexado: ${data.commit}`)
+        if (data.totalFiles)
+          lines.push(`Archivos analizados: ${data.totalFiles}`)
+
+        if (data.keyFiles?.readme) {
+          lines.push("README detectado.")
+        }
+
+        if (data.keyFiles?.docs > 0) {
+          lines.push(
+            `Documentación encontrada (${data.keyFiles.docs} archivos).`
+          )
+        }
+
+        if (data.keyFiles?.apiRoutes > 0) {
+          lines.push(
+            `Rutas API detectadas (${data.keyFiles.apiRoutes}).`
+          )
+        }
+
+        lines.push("")
+        lines.push(
+          "Podés preguntarme cómo funciona el sistema, dónde está definido algo o qué hace un archivo o módulo."
+        )
+
+        setMessages([
+          {
+            role: "assistant",
+            content: lines.join("\n"),
+          },
+        ])
+      } catch {
+        // silencioso
+      }
+    }
+
+    loadRepositorySummary()
+  }, [repositoryId])
+
+  /* -------------------------------------------
    * Cancelar request
    * ------------------------------------------- */
   const handleCancel = () => {
@@ -75,16 +132,11 @@ export function ChatInterface() {
 
   /* -------------------------------------------
    * Enviar pregunta
-  
    * ------------------------------------------- */
-  console.log("[ChatInterface] repo:", {
-    repositoryId,
-    repositoryPath,
-  })
   const handleSend = async () => {
     if (!input.trim() || loading) return
 
-    if (!repositoryId || !repositoryPath) {
+    if (!repositoryId) {
       setMessages((prev) => [
         ...prev,
         {
@@ -108,6 +160,7 @@ export function ChatInterface() {
 
     const controller = new AbortController()
     abortControllerRef.current = controller
+    console.log("repositoryId:", repositoryId)
 
     try {
       const res = await fetch("/api/chat/query", {
@@ -117,7 +170,6 @@ export function ChatInterface() {
         body: JSON.stringify({
           question,
           repositoryId,
-          repositoryPath,
         }),
       })
 
@@ -130,9 +182,6 @@ export function ChatInterface() {
         throw new Error(data.error || "Error al consultar el repositorio")
       }
 
-      /* -----------------------------
-       * ContextPanel → sources
-       * ----------------------------- */
       const contextFiles =
         data.sources?.files?.map((path: string) => ({
           name: path.split("/").pop(),
