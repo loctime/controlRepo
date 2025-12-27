@@ -8,6 +8,7 @@ import { saveProjectBrain, hasProjectBrain } from "@/lib/project-brain/storage-f
 import { createRepositoryId } from "@/lib/repository/utils"
 import { generateMetrics } from "@/lib/repository/metrics/generator"
 import { saveMetrics } from "@/lib/repository/metrics/storage-filesystem"
+import { getAuthenticatedUserId, getGitHubAccessToken } from "@/lib/auth/server-auth"
 
 /**
  * POST /api/repository/index
@@ -15,6 +16,27 @@ import { saveMetrics } from "@/lib/repository/metrics/storage-filesystem"
  */
 export async function POST(request: NextRequest) {
   try {
+    // A) Autenticación: Verificar token Firebase y obtener UID
+    let uid: string
+    try {
+      uid = await getAuthenticatedUserId(request)
+    } catch (error) {
+      console.error("[INDEX] Error de autenticación:", error)
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "No autorizado" },
+        { status: 401 }
+      )
+    }
+
+    // B) Obtener access_token de GitHub del usuario desde Firestore
+    const accessToken = await getGitHubAccessToken(uid)
+    if (!accessToken) {
+      return NextResponse.json(
+        { error: "GitHub no conectado. Por favor, conecta tu cuenta de GitHub primero." },
+        { status: 400 }
+      )
+    }
+
     const body = await request.json()
     const { owner, repo, branch } = body
 
@@ -26,21 +48,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validar GITHUB_TOKEN al inicio
-    if (!process.env.GITHUB_TOKEN) {
-      return NextResponse.json(
-        { error: "GITHUB_TOKEN no configurado. Configura .env.local" },
-        { status: 401 }
-      )
-    }
-
     // Resolver rama primero para crear repositoryId con branch
     let resolvedBranch: { branch: string; lastCommit: string }
     let repoMetadata
 
     try {
-      repoMetadata = await getRepositoryMetadata(owner, repo)
-      resolvedBranch = await resolveRepositoryBranch(owner, repo, branch)
+      repoMetadata = await getRepositoryMetadata(owner, repo, accessToken)
+      resolvedBranch = await resolveRepositoryBranch(owner, repo, accessToken, branch)
     } catch (error) {
       console.error(`[INDEX] Error resolving branch for ${owner}/${repo}:`, error)
       return NextResponse.json(
@@ -123,7 +137,7 @@ export async function POST(request: NextRequest) {
       // Iniciar indexación de forma asíncrona
       // En producción, esto debería ejecutarse en un worker/queue
       console.log(`[INDEX] Indexing started for ${repositoryId}`)
-      indexRepository(owner, repo, finalBranch)
+      indexRepository(owner, repo, accessToken, finalBranch)
         .then(async (updatedIndex) => {
           // Actualizar índice con los archivos procesados
           updatedIndex.status = "completed"

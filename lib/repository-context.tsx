@@ -6,6 +6,7 @@ import { RepositoryMetrics } from "./types/repository-metrics"
 import { parseRepositoryId } from "./repository/utils"
 import { searchFiles as searchFilesUtil } from "./repository/search"
 import { useAuth } from "./auth-context"
+import { getAuth } from "firebase/auth"
 
 type RepositoryStatus = "idle" | "indexing" | "completed" | "error"
 
@@ -245,10 +246,21 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
       setCurrentMetrics(null)
 
       try {
+        // Obtener el usuario actual y su token de autenticación
+        const auth = getAuth()
+        const currentUser = auth.currentUser
+
+        if (!currentUser) {
+          throw new Error("No hay usuario autenticado. Por favor, inicia sesión.")
+        }
+
+        const token = await currentUser.getIdToken()
+
         const response = await fetch("/api/repository/index", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
           },
           body: JSON.stringify({ owner, repo, branch }),
         })

@@ -8,6 +8,7 @@ import { generateMinimalProjectBrain } from "@/lib/project-brain/generator"
 import { saveProjectBrain } from "@/lib/project-brain/storage-filesystem"
 import { generateMetrics } from "@/lib/repository/metrics/generator"
 import { saveMetrics } from "@/lib/repository/metrics/storage-filesystem"
+import { getAuthenticatedUserId, getGitHubAccessToken } from "@/lib/auth/server-auth"
 
 /**
  * POST /api/repository/reindex
@@ -15,6 +16,27 @@ import { saveMetrics } from "@/lib/repository/metrics/storage-filesystem"
  */
 export async function POST(request: NextRequest) {
   try {
+    // Autenticación: Verificar token Firebase y obtener UID
+    let uid: string
+    try {
+      uid = await getAuthenticatedUserId(request)
+    } catch (error) {
+      console.error("[REINDEX] Error de autenticación:", error)
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "No autorizado" },
+        { status: 401 }
+      )
+    }
+
+    // Obtener access_token de GitHub del usuario desde Firestore
+    const accessToken = await getGitHubAccessToken(uid)
+    if (!accessToken) {
+      return NextResponse.json(
+        { error: "GitHub no conectado. Por favor, conecta tu cuenta de GitHub primero." },
+        { status: 400 }
+      )
+    }
+
     const body = await request.json()
     const { owner, repo, branch } = body
 
@@ -23,14 +45,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "owner y repo son requeridos" },
         { status: 400 }
-      )
-    }
-
-    // Validar GITHUB_TOKEN al inicio
-    if (!process.env.GITHUB_TOKEN) {
-      return NextResponse.json(
-        { error: "GITHUB_TOKEN no configurado. Configura .env.local" },
-        { status: 401 }
       )
     }
 
@@ -63,7 +77,7 @@ export async function POST(request: NextRequest) {
       }
 
       // Resolver rama automáticamente (usar la del índice existente si no se proporciona)
-      resolvedBranch = await resolveRepositoryBranch(owner, repo, branch || existingIndex.branch)
+      resolvedBranch = await resolveRepositoryBranch(owner, repo, accessToken, branch || existingIndex.branch)
     } catch (error) {
       return NextResponse.json(
         { error: `Error al resolver rama: ${error instanceof Error ? error.message : "Error desconocido"}` },
@@ -134,7 +148,7 @@ export async function POST(request: NextRequest) {
       console.log(`[INDEX] Re-indexing started for ${repositoryId}`)
 
       // Iniciar re-indexación de forma asíncrona
-      indexRepository(owner, repo, actualBranch)
+      indexRepository(owner, repo, accessToken, actualBranch)
         .then(async (updatedIndex) => {
           // Actualizar índice con los archivos procesados
           updatedIndex.status = "completed"

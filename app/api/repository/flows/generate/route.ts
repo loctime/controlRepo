@@ -12,6 +12,7 @@ import { generateFlows } from "@/lib/repository/flows/generator"
 import { saveFlows, getFlows } from "@/lib/repository/flows/storage-filesystem"
 import { createRepositoryId } from "@/lib/repository/utils"
 import { resolveRepositoryBranch } from "@/lib/github/client"
+import { getAuthenticatedUserId, getGitHubAccessToken } from "@/lib/auth/server-auth"
 
 /**
  * POST /api/repository/flows/generate
@@ -19,6 +20,27 @@ import { resolveRepositoryBranch } from "@/lib/github/client"
  */
 export async function POST(request: NextRequest) {
   try {
+    // Autenticación: Verificar token Firebase y obtener UID
+    let uid: string
+    try {
+      uid = await getAuthenticatedUserId(request)
+    } catch (error) {
+      console.error("[FLOWS] Error de autenticación:", error)
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "No autorizado" },
+        { status: 401 }
+      )
+    }
+
+    // Obtener access_token de GitHub del usuario desde Firestore
+    const accessToken = await getGitHubAccessToken(uid)
+    if (!accessToken) {
+      return NextResponse.json(
+        { error: "GitHub no conectado. Por favor, conecta tu cuenta de GitHub primero." },
+        { status: 400 }
+      )
+    }
+
     const body = await request.json()
     const { owner, repo, branch } = body
 
@@ -30,18 +52,10 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validar GITHUB_TOKEN
-    if (!process.env.GITHUB_TOKEN) {
-      return NextResponse.json(
-        { error: "GITHUB_TOKEN no configurado. Configura .env.local" },
-        { status: 401 }
-      )
-    }
-
     // Resolver rama
     let resolvedBranch: { branch: string; lastCommit: string }
     try {
-      resolvedBranch = await resolveRepositoryBranch(owner, repo, branch)
+      resolvedBranch = await resolveRepositoryBranch(owner, repo, accessToken, branch)
     } catch (error) {
       return NextResponse.json(
         { error: `Error al resolver rama: ${error instanceof Error ? error.message : "Error desconocido"}` },
@@ -114,6 +128,27 @@ export async function POST(request: NextRequest) {
  */
 export async function GET(request: NextRequest) {
   try {
+    // Autenticación: Verificar token Firebase y obtener UID
+    let uid: string
+    try {
+      uid = await getAuthenticatedUserId(request)
+    } catch (error) {
+      console.error("[FLOWS] Error de autenticación:", error)
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "No autorizado" },
+        { status: 401 }
+      )
+    }
+
+    // Obtener access_token de GitHub del usuario desde Firestore
+    const accessToken = await getGitHubAccessToken(uid)
+    if (!accessToken) {
+      return NextResponse.json(
+        { error: "GitHub no conectado. Por favor, conecta tu cuenta de GitHub primero." },
+        { status: 400 }
+      )
+    }
+
     const { searchParams } = new URL(request.url)
     const owner = searchParams.get("owner")
     const repo = searchParams.get("repo")
@@ -130,7 +165,7 @@ export async function GET(request: NextRequest) {
     // Resolver rama
     let resolvedBranch: { branch: string; lastCommit: string }
     try {
-      resolvedBranch = await resolveRepositoryBranch(owner, repo, branch || undefined)
+      resolvedBranch = await resolveRepositoryBranch(owner, repo, accessToken, branch || undefined)
     } catch (error) {
       return NextResponse.json(
         { error: `Error al resolver rama: ${error instanceof Error ? error.message : "Error desconocido"}` },

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getRepositoryIndex } from "@/lib/repository/storage"
 import { getLastCommit } from "@/lib/github/client"
 import { createRepositoryId } from "@/lib/repository/utils"
+import { getAuthenticatedUserId, getGitHubAccessToken } from "@/lib/auth/server-auth"
 
 /**
  * GET /api/repository/check-updates
@@ -10,6 +11,27 @@ import { createRepositoryId } from "@/lib/repository/utils"
  */
 export async function GET(request: NextRequest) {
   try {
+    // Autenticación: Verificar token Firebase y obtener UID
+    let uid: string
+    try {
+      uid = await getAuthenticatedUserId(request)
+    } catch (error) {
+      console.error("[CHECK-UPDATES] Error de autenticación:", error)
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "No autorizado" },
+        { status: 401 }
+      )
+    }
+
+    // Obtener access_token de GitHub del usuario desde Firestore
+    const accessToken = await getGitHubAccessToken(uid)
+    if (!accessToken) {
+      return NextResponse.json(
+        { error: "GitHub no conectado. Por favor, conecta tu cuenta de GitHub primero." },
+        { status: 400 }
+      )
+    }
+
     const searchParams = request.nextUrl.searchParams
     const owner = searchParams.get("owner")
     const repo = searchParams.get("repo")
@@ -20,14 +42,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(
         { error: "owner y repo son requeridos como query parameters" },
         { status: 400 }
-      )
-    }
-
-    // Validar GITHUB_TOKEN
-    if (!process.env.GITHUB_TOKEN) {
-      return NextResponse.json(
-        { error: "GITHUB_TOKEN no configurado" },
-        { status: 401 }
       )
     }
 
@@ -67,7 +81,7 @@ export async function GET(request: NextRequest) {
     // Obtener último commit SHA del repositorio (operación liviana)
     let currentCommitSha: string
     try {
-      currentCommitSha = await getLastCommit(owner, repo, targetBranch)
+      currentCommitSha = await getLastCommit(owner, repo, targetBranch, accessToken)
     } catch (error) {
       // Manejar errores de GitHub API (rate limit, repo privado, branch inexistente)
       console.error(`[CHECK-UPDATES] Error al obtener último commit para ${repositoryId}:`, error)
