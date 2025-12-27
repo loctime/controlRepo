@@ -24,12 +24,14 @@ import {
 import { useRepository } from "@/lib/repository-context"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { AddRepositoryInline } from "./add-repository-inline"
+import { GitHubRepoSelector } from "./github-repo-selector"
 
 export function HeaderRepository() {
-  const { repositoryId, status, loading, currentIndex, reindexRepository } =
+  const { repositoryId, status, loading, currentIndex, reindexRepository, indexRepository } =
     useRepository()
 
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [githubSelectorOpen, setGithubSelectorOpen] = useState(false)
   const [branches, setBranches] = useState<string[]>([])
   const [loadingBranches, setLoadingBranches] = useState(false)
   const [hasUpdates, setHasUpdates] = useState(false)
@@ -148,6 +150,14 @@ export function HeaderRepository() {
     }
   }
 
+  const handleSelectGitHubRepo = async (repo: {
+    owner: string
+    repo: string
+    branch: string
+  }) => {
+    await indexRepository(repo.owner, repo.repo, repo.branch)
+  }
+
   const repositoryDisplay = currentIndex
     ? `${currentIndex.owner}/${currentIndex.repo}@${currentIndex.branch}`
     : repositoryId || "Sin repositorio"
@@ -170,12 +180,24 @@ export function HeaderRepository() {
 
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="font-mono text-xs truncate px-2 py-1 rounded-md border bg-muted/30">
-                {repositoryDisplay}
-              </span>
+              {githubConnected ? (
+                <button
+                  onClick={() => setGithubSelectorOpen(true)}
+                  className="font-mono text-xs truncate px-2 py-1 rounded-md border bg-muted/30 hover:bg-muted/50 cursor-pointer transition-colors"
+                >
+                  {repositoryDisplay}
+                </button>
+              ) : (
+                <span className="font-mono text-xs truncate px-2 py-1 rounded-md border bg-muted/30">
+                  {repositoryDisplay}
+                </span>
+              )}
             </TooltipTrigger>
             <TooltipContent>
               <p className="font-mono">{repositoryDisplay}</p>
+              {githubConnected && (
+                <p className="text-xs mt-1">Click para seleccionar otro repositorio</p>
+              )}
             </TooltipContent>
           </Tooltip>
 
@@ -291,6 +313,12 @@ export function HeaderRepository() {
       <AddRepositoryInline
         isOpen={dialogOpen}
         onClose={() => setDialogOpen(false)}
+      />
+
+      <GitHubRepoSelector
+        isOpen={githubSelectorOpen}
+        onClose={() => setGithubSelectorOpen(false)}
+        onSelect={handleSelectGitHubRepo}
       />
     </div>
   )
