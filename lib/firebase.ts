@@ -13,6 +13,13 @@ const envVars = {
   NEXT_PUBLIC_FIREBASE_APP_ID: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 }
 
+// Log temporal para verificar variables de entorno en producción
+console.log('[ENV CHECK]', {
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+});
+
 // Validar que todas las variables estén presentes y no estén vacías
 const missingVars: string[] = []
 const invalidVars: string[] = []

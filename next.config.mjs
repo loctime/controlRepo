@@ -6,6 +6,10 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // Permitir todos los console.log en producción (Vercel)
+  compiler: {
+    removeConsole: false,
+  },
 }
 
 export default nextConfig
