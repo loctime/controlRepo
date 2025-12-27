@@ -32,6 +32,7 @@ export function HeaderRepository() {
   const [loadingBranches, setLoadingBranches] = useState(false)
   const [hasUpdates, setHasUpdates] = useState(false)
   const [reindexing, setReindexing] = useState(false)
+  const [githubConnected, setGithubConnected] = useState<boolean | null>(null)
 
   /* =======================
      Cargar ramas
@@ -83,6 +84,16 @@ export function HeaderRepository() {
     return () => clearInterval(id)
   }, [currentIndex, status])
 
+
+  useEffect(() => {
+    fetch(`${process.env.NEXT_PUBLIC_CONTROLFILE_URL}/api/github/status`, {
+      credentials: "include",
+    })
+      .then(res => res.json())
+      .then(data => setGithubConnected(Boolean(data.connected)))
+      .catch(() => setGithubConnected(false))
+  }, [])
+  
   /* =======================
      Handlers
   ======================= */
@@ -210,16 +221,24 @@ export function HeaderRepository() {
             <TooltipTrigger asChild>
               <Button
                 size="icon-sm"
-                variant="ghost"
-                onClick={() =>
-                  (window.location.href = `${process.env.NEXT_PUBLIC_CONTROLFILE_URL}/api/auth/github`)
-                }
+                variant={githubConnected ? "secondary" : "ghost"}
+                onClick={() => {
+                  if (!githubConnected) {
+                    window.location.href =
+                      `${process.env.NEXT_PUBLIC_CONTROLFILE_URL}/api/auth/github`
+                  }
+                }}
                 className="h-6 w-6"
+                disabled={githubConnected === null}
               >
                 <Github className="h-4 w-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Conectar GitHub</TooltipContent>
+            <TooltipContent>
+              {githubConnected
+                ? "GitHub conectado"
+                : "Conectar GitHub"}
+            </TooltipContent>
           </Tooltip>
 
           <Tooltip>
