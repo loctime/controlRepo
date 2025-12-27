@@ -7,13 +7,12 @@ import { Loader2, Github, X } from "lucide-react"
 
 interface GitHubRepo {
   id: number
-  full_name: string
-  owner: {
-    login: string
-  }
+  fullName: string
+  owner: string
   name: string
-  default_branch: string
+  defaultBranch: string
   private: boolean
+  updatedAt: string
 }
 
 interface GitHubRepoSelectorProps {
@@ -119,10 +118,10 @@ export function GitHubRepoSelector({
             >
               <div className="min-w-0">
                 <p className="font-mono text-sm truncate">
-                  {repo.full_name}
+                  {repo.fullName}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  branch: {repo.default_branch}
+                  branch: {repo.defaultBranch}
                   {repo.private ? " · privado" : ""}
                 </p>
               </div>
@@ -131,9 +130,9 @@ export function GitHubRepoSelector({
                 size="sm"
                 onClick={() => {
                   onSelect({
-                    owner: repo.owner.login,
+                    owner: repo.owner,
                     repo: repo.name,
-                    branch: repo.default_branch,
+                    branch: repo.defaultBranch,
                   })
                   onClose()
                 }}
