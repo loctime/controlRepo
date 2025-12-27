@@ -1,6 +1,8 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { getAuth } from "firebase/auth"
+
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -86,13 +88,42 @@ export function HeaderRepository() {
 
 
   useEffect(() => {
-    fetch(`${process.env.NEXT_PUBLIC_CONTROLFILE_URL}/api/github/status`, {
-      credentials: "include",
-    })
-      .then(res => res.json())
-      .then(data => setGithubConnected(Boolean(data.connected)))
-      .catch(() => setGithubConnected(false))
+    const checkGithubStatus = async () => {
+      try {
+        const auth = getAuth()
+        const user = auth.currentUser
+  
+        if (!user) {
+          setGithubConnected(false)
+          return
+        }
+  
+        const token = await user.getIdToken()
+  
+        const res = await fetch(
+          `${process.env.NEXT_PUBLIC_CONTROLFILE_URL}/api/github/status`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        )
+  
+        if (!res.ok) {
+          setGithubConnected(false)
+          return
+        }
+  
+        const data = await res.json()
+        setGithubConnected(Boolean(data.connected))
+      } catch (err) {
+        setGithubConnected(false)
+      }
+    }
+  
+    checkGithubStatus()
   }, [])
+  
   
   /* =======================
      Handlers
