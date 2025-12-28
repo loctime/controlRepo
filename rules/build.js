@@ -15,7 +15,8 @@ const files = [
   'controlgastos.rules',
   'controllaudit.rules',
   'controlstore.rules',
-  'horarios.rules'
+  'horarios.rules',
+  'repo.rules'  // ControlRepo rules
 ];
 
 // Encabezado del archivo

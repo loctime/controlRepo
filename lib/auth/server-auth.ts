@@ -262,8 +262,10 @@ export async function getGitHubAccessToken(uid: string): Promise<string | null> 
   const { db } = initializeFirebaseAdmin()
 
   try {
-    console.log(`[AUTH] Buscando GitHub integration en colección 'githubIntegrations' para usuario ${uid}`)
-    const docRef = db.collection("githubIntegrations").doc(uid)
+    // Buscar en la estructura correcta: /apps/controlrepo/{uid}/githubIntegration
+    const docPath = `apps/controlrepo/${uid}/githubIntegration`
+    console.log(`[AUTH] Buscando GitHub integration en '${docPath}' para usuario ${uid}`)
+    const docRef = db.doc(docPath)
     const doc = await docRef.get()
 
     if (!doc.exists) {
@@ -275,7 +277,7 @@ export async function getGitHubAccessToken(uid: string): Promise<string | null> 
         timestamp: new Date().toISOString(),
         component: "getGitHubAccessToken",
         userId: uid,
-        collection: "githubIntegrations",
+        documentPath: docPath,
         documentExists: false,
         message: "GitHub integration no encontrada",
       }))

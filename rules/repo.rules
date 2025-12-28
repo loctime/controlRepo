@@ -1,1 +1,14 @@
-//crear reglas simples
+// ========= CONTROLREPO RULES =========
+
+// Reglas para apps/controlrepo/{userId}
+// Documento principal del usuario en ControlRepo
+match /apps/controlrepo/{userId} {
+  // Permitir lectura/escritura solo al usuario autenticado que es dueño del documento
+  allow read, write: if isAuth() && uid() == userId;
+}
+
+// Documento específico para GitHub integration: apps/controlrepo/{userId}/githubIntegration
+match /apps/controlrepo/{userId}/githubIntegration {
+  // Permitir lectura/escritura solo al usuario autenticado que es dueño
+  allow read, write: if isAuth() && uid() == userId;
+}
