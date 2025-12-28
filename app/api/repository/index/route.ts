@@ -13,9 +13,25 @@ import { getAuthenticatedUserId, getGitHubAccessToken } from "@/lib/auth/server-
 /**
  * POST /api/repository/index
  * Indexa un repositorio completo
+ * 
+ * LOGS EN PRODUCCIÓN:
+ * - Los logs con console.log/console.error aparecen en los logs del servidor, NO en la consola del navegador
+ * - En Vercel: Dashboard > Tu proyecto > Functions > Logs
+ * - Los logs estructurados (JSON.stringify) facilitan el filtrado y búsqueda
+ * - Los logs con prefijo [INDEX] y [AUTH] ayudan a identificar el origen
+ * - Los errores incluyen errorType para facilitar el debugging
  */
 export async function POST(request: NextRequest) {
   console.log("[INDEX] ===== Inicio de indexación =====")
+  console.log(JSON.stringify({
+    level: "info",
+    service: "controlfile-backend",
+    environment: process.env.NODE_ENV || "production",
+    timestamp: new Date().toISOString(),
+    path: "/api/repository/index",
+    method: "POST",
+    message: "Inicio de indexación",
+  }))
   try {
     // A) Autenticación: Verificar token Firebase y obtener UID
     let uid: string
@@ -256,9 +272,38 @@ export async function POST(request: NextRequest) {
     console.error("[INDEX] ===== Error en POST /api/repository/index =====")
     console.error("[INDEX] Error:", error)
     console.error("[INDEX] Stack:", error instanceof Error ? error.stack : "No stack disponible")
+    
+    // Determinar el tipo de error para ayudar con el debugging
+    let errorType = "UNKNOWN_ERROR"
+    let errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    
+    if (errorMessage.includes("FIREBASE_SERVICE_ACCOUNT_KEY") || errorMessage.includes("Firebase Admin")) {
+      errorType = "FIREBASE_INIT_ERROR"
+    } else if (errorMessage.includes("Token inválido") || errorMessage.includes("Authorization")) {
+      errorType = "AUTH_ERROR"
+    } else if (errorMessage.includes("GitHub")) {
+      errorType = "GITHUB_ERROR"
+    } else if (errorMessage.includes("lock") || errorMessage.includes("Lock")) {
+      errorType = "LOCK_ERROR"
+    }
+    
+    // Log estructurado para producción (aparece en logs del servidor)
+    console.error(JSON.stringify({
+      level: "error",
+      service: "controlfile-backend",
+      environment: process.env.NODE_ENV || "production",
+      timestamp: new Date().toISOString(),
+      path: "/api/repository/index",
+      method: "POST",
+      errorType,
+      errorMessage: errorMessage.substring(0, 200), // Limitar longitud
+      hasStack: error instanceof Error && !!error.stack,
+    }))
+    
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Error desconocido",
+        error: errorMessage,
+        errorType, // Incluir tipo de error para debugging
       },
       { status: 500 }
     )

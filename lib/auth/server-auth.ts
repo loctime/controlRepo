@@ -1,6 +1,12 @@
 /**
  * Utilidades de autenticación para el servidor (API routes)
  * Usa firebase-admin para verificar tokens de Firebase Auth
+ * 
+ * LOGS EN PRODUCCIÓN:
+ * - Los logs aparecen en los logs del servidor (Vercel Functions Logs, etc.)
+ * - Los logs estructurados (JSON.stringify) facilitan el filtrado
+ * - Los logs con prefijo [AUTH] identifican el componente
+ * - Los errores de inicialización de Firebase Admin se registran con detalles
  */
 
 import { initializeApp, getApps, cert, App } from "firebase-admin/app"
@@ -37,6 +43,18 @@ function initializeFirebaseAdmin(): { auth: Auth; db: Firestore } {
   console.log(`[AUTH] FIREBASE_SERVICE_ACCOUNT_KEY existe: ${!!serviceAccountKey}`)
   console.log(`[AUTH] FIREBASE_SERVICE_ACCOUNT_KEY longitud: ${serviceAccountKey?.length || 0}`)
   console.log(`[AUTH] GOOGLE_APPLICATION_CREDENTIALS existe: ${!!process.env.GOOGLE_APPLICATION_CREDENTIALS}`)
+  
+  // Log estructurado para producción
+  console.log(JSON.stringify({
+    level: "info",
+    service: "controlfile-backend",
+    environment: process.env.NODE_ENV || "production",
+    timestamp: new Date().toISOString(),
+    component: "firebase-admin-init",
+    hasServiceAccountKey: !!serviceAccountKey,
+    serviceAccountKeyLength: serviceAccountKey?.length || 0,
+    hasGoogleCredentials: !!process.env.GOOGLE_APPLICATION_CREDENTIALS,
+  }))
 
   // Inicializar con credenciales desde variables de entorno
   // Para producción, usar GOOGLE_APPLICATION_CREDENTIALS o service account JSON
@@ -51,6 +69,19 @@ function initializeFirebaseAdmin(): { auth: Auth; db: Firestore } {
     } catch (parseError) {
       console.error("[AUTH] ❌ Error al parsear FIREBASE_SERVICE_ACCOUNT_KEY:", parseError)
       console.error(`[AUTH] Primeros 100 caracteres del valor: ${serviceAccountKey.substring(0, 100)}...`)
+      
+      // Log estructurado para producción
+      console.error(JSON.stringify({
+        level: "error",
+        service: "controlfile-backend",
+        environment: process.env.NODE_ENV || "production",
+        timestamp: new Date().toISOString(),
+        component: "firebase-admin-init",
+        errorType: "JSON_PARSE_ERROR",
+        errorMessage: parseError instanceof Error ? parseError.message : "Error desconocido al parsear JSON",
+        serviceAccountKeyPreview: serviceAccountKey.substring(0, 100),
+      }))
+      
       throw new Error(
         `Error al parsear FIREBASE_SERVICE_ACCOUNT_KEY como JSON: ${parseError instanceof Error ? parseError.message : "Error desconocido"}`
       )
@@ -82,6 +113,16 @@ function initializeFirebaseAdmin(): { auth: Auth; db: Firestore } {
       console.log("[AUTH] ✅ Firebase Admin inicializado con projectId")
     } catch (initError) {
       console.error("[AUTH] ❌ Error al inicializar Firebase Admin con projectId:", initError)
+      console.error(JSON.stringify({
+        level: "error",
+        service: "controlfile-backend",
+        environment: process.env.NODE_ENV || "production",
+        timestamp: new Date().toISOString(),
+        component: "firebase-admin-init",
+        errorType: "INIT_ERROR",
+        initMethod: "projectId",
+        errorMessage: initError instanceof Error ? initError.message : "Error desconocido",
+      }))
       throw initError
     }
   } else if (serviceAccount) {
@@ -91,8 +132,27 @@ function initializeFirebaseAdmin(): { auth: Auth; db: Firestore } {
         credential: cert(serviceAccount),
       })
       console.log("[AUTH] ✅ Firebase Admin inicializado con service account")
+      console.log(JSON.stringify({
+        level: "info",
+        service: "controlfile-backend",
+        environment: process.env.NODE_ENV || "production",
+        timestamp: new Date().toISOString(),
+        component: "firebase-admin-init",
+        initMethod: "serviceAccount",
+        status: "success",
+      }))
     } catch (initError) {
       console.error("[AUTH] ❌ Error al inicializar Firebase Admin con service account:", initError)
+      console.error(JSON.stringify({
+        level: "error",
+        service: "controlfile-backend",
+        environment: process.env.NODE_ENV || "production",
+        timestamp: new Date().toISOString(),
+        component: "firebase-admin-init",
+        errorType: "INIT_ERROR",
+        initMethod: "serviceAccount",
+        errorMessage: initError instanceof Error ? initError.message : "Error desconocido",
+      }))
       throw initError
     }
   } else {
@@ -101,8 +161,27 @@ function initializeFirebaseAdmin(): { auth: Auth; db: Firestore } {
     try {
       app = initializeApp()
       console.log("[AUTH] ✅ Firebase Admin inicializado con GOOGLE_APPLICATION_CREDENTIALS")
+      console.log(JSON.stringify({
+        level: "info",
+        service: "controlfile-backend",
+        environment: process.env.NODE_ENV || "production",
+        timestamp: new Date().toISOString(),
+        component: "firebase-admin-init",
+        initMethod: "GOOGLE_APPLICATION_CREDENTIALS",
+        status: "success",
+      }))
     } catch (initError) {
       console.error("[AUTH] ❌ Error al inicializar Firebase Admin con GOOGLE_APPLICATION_CREDENTIALS:", initError)
+      console.error(JSON.stringify({
+        level: "error",
+        service: "controlfile-backend",
+        environment: process.env.NODE_ENV || "production",
+        timestamp: new Date().toISOString(),
+        component: "firebase-admin-init",
+        errorType: "INIT_ERROR",
+        initMethod: "GOOGLE_APPLICATION_CREDENTIALS",
+        errorMessage: initError instanceof Error ? initError.message : "Error desconocido",
+      }))
       throw initError
     }
   }
