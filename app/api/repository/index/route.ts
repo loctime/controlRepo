@@ -22,6 +22,8 @@ import { getAuthenticatedUserId, getGitHubAccessToken } from "@/lib/auth/server-
  * - Los errores incluyen errorType para facilitar el debugging
  */
 export async function POST(request: NextRequest) {
+  // Log inmediato para confirmar que el endpoint se ejecuta
+  console.log("🔥🔥🔥 [INDEX] POST /api/repository/index EJECUTÁNDOSE 🔥🔥🔥")
   console.log("[INDEX] ===== Inicio de indexación =====")
   console.log(JSON.stringify({
     level: "info",

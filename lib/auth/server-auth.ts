@@ -262,21 +262,56 @@ export async function getGitHubAccessToken(uid: string): Promise<string | null> 
   const { db } = initializeFirebaseAdmin()
 
   try {
+    console.log(`[AUTH] Buscando GitHub integration en colección 'githubIntegrations' para usuario ${uid}`)
     const docRef = db.collection("githubIntegrations").doc(uid)
     const doc = await docRef.get()
 
     if (!doc.exists) {
       console.log(`[AUTH] GitHub integration no encontrada para usuario ${uid}`)
+      console.log(JSON.stringify({
+        level: "info",
+        service: "controlfile-backend",
+        environment: process.env.NODE_ENV || "production",
+        timestamp: new Date().toISOString(),
+        component: "getGitHubAccessToken",
+        userId: uid,
+        collection: "githubIntegrations",
+        documentExists: false,
+        message: "GitHub integration no encontrada",
+      }))
       return null
     }
 
     const data = doc.data()
+    console.log(`[AUTH] Documento encontrado. Campos disponibles: ${Object.keys(data || {}).join(", ")}`)
     const token = data?.access_token || null
     
     if (!token) {
       console.log(`[AUTH] access_token no encontrado en documento de GitHub para usuario ${uid}`)
+      console.log(JSON.stringify({
+        level: "warn",
+        service: "controlfile-backend",
+        environment: process.env.NODE_ENV || "production",
+        timestamp: new Date().toISOString(),
+        component: "getGitHubAccessToken",
+        userId: uid,
+        documentExists: true,
+        hasAccessTokenField: "access_token" in (data || {}),
+        dataKeys: Object.keys(data || {}),
+        message: "access_token no encontrado en documento",
+      }))
     } else {
-      console.log(`[AUTH] access_token obtenido para usuario ${uid}`)
+      console.log(`[AUTH] access_token obtenido para usuario ${uid} (longitud: ${token.length})`)
+      console.log(JSON.stringify({
+        level: "info",
+        service: "controlfile-backend",
+        environment: process.env.NODE_ENV || "production",
+        timestamp: new Date().toISOString(),
+        component: "getGitHubAccessToken",
+        userId: uid,
+        tokenLength: token.length,
+        message: "access_token obtenido exitosamente",
+      }))
     }
     
     return token
