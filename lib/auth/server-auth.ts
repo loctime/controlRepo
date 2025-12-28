@@ -89,11 +89,33 @@ function initializeFirebaseAdmin(): { auth: Auth; db: Firestore } {
   }
 
   if (!serviceAccount && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    // En producción, las credenciales son REQUERIDAS
+    const isProduction = process.env.NODE_ENV === "production"
+    
+    if (isProduction) {
+      console.error("[AUTH] ❌ PRODUCCIÓN: Credenciales de Firebase Admin REQUERIDAS")
+      console.error(JSON.stringify({
+        level: "error",
+        service: "controlfile-backend",
+        environment: "production",
+        timestamp: new Date().toISOString(),
+        component: "firebase-admin-init",
+        errorType: "MISSING_CREDENTIALS",
+        errorMessage: "FIREBASE_SERVICE_ACCOUNT_KEY o GOOGLE_APPLICATION_CREDENTIALS deben estar configurados en producción",
+        hasServiceAccountKey: !!serviceAccountKey,
+        hasGoogleCredentials: !!process.env.GOOGLE_APPLICATION_CREDENTIALS,
+      }))
+      throw new Error(
+        "Firebase Admin SDK requiere credenciales en producción. " +
+        "Configura FIREBASE_SERVICE_ACCOUNT_KEY o GOOGLE_APPLICATION_CREDENTIALS."
+      )
+    }
+
     // En desarrollo, intentar usar las credenciales del proyecto
     // Si no están disponibles, usar emulador o fallback
     console.warn(
       "[AUTH] ⚠️ FIREBASE_SERVICE_ACCOUNT_KEY o GOOGLE_APPLICATION_CREDENTIALS no configurado. " +
-      "Usando inicialización con projectId solamente."
+      "Usando inicialización con projectId solamente (solo para desarrollo)."
     )
 
     const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
@@ -105,12 +127,12 @@ function initializeFirebaseAdmin(): { auth: Auth; db: Firestore } {
       )
     }
 
-    console.log(`[AUTH] Inicializando Firebase Admin con projectId: ${projectId}`)
+    console.log(`[AUTH] Inicializando Firebase Admin con projectId: ${projectId} (SOLO DESARROLLO)`)
     try {
       app = initializeApp({
         projectId,
       })
-      console.log("[AUTH] ✅ Firebase Admin inicializado con projectId")
+      console.log("[AUTH] ✅ Firebase Admin inicializado con projectId (NOTA: Firestore puede no funcionar sin credenciales)")
     } catch (initError) {
       console.error("[AUTH] ❌ Error al inicializar Firebase Admin con projectId:", initError)
       console.error(JSON.stringify({
@@ -190,9 +212,23 @@ function initializeFirebaseAdmin(): { auth: Auth; db: Firestore } {
     auth = getAuth(app)
     db = getFirestore(app)
     console.log("[AUTH] ✅ Auth y Firestore obtenidos exitosamente")
+    
+    // Nota: La verificación de credenciales se hará cuando se use Firestore por primera vez
+    // Si hay un problema de credenciales, se detectará en getGitHubAccessToken u otras operaciones
+    // y se manejará apropiadamente
+    
     return { auth, db }
   } catch (error) {
     console.error("[AUTH] ❌ Error al obtener Auth o Firestore:", error)
+    console.error(JSON.stringify({
+      level: "error",
+      service: "controlfile-backend",
+      environment: process.env.NODE_ENV || "production",
+      timestamp: new Date().toISOString(),
+      component: "firebase-admin-init",
+      errorType: "AUTH_FIRESTORE_ERROR",
+      errorMessage: error instanceof Error ? error.message : "Error desconocido",
+    }))
     throw error
   }
 }
@@ -230,14 +266,51 @@ export async function getGitHubAccessToken(uid: string): Promise<string | null> 
     const doc = await docRef.get()
 
     if (!doc.exists) {
+      console.log(`[AUTH] GitHub integration no encontrada para usuario ${uid}`)
       return null
     }
 
     const data = doc.data()
-    return data?.access_token || null
+    const token = data?.access_token || null
+    
+    if (!token) {
+      console.log(`[AUTH] access_token no encontrado en documento de GitHub para usuario ${uid}`)
+    } else {
+      console.log(`[AUTH] access_token obtenido para usuario ${uid}`)
+    }
+    
+    return token
   } catch (error) {
-    console.error(`Error al obtener access_token para usuario ${uid}:`, error)
-    throw error
+    // Log detallado del error
+    console.error(`[AUTH] Error al obtener access_token para usuario ${uid}:`, error)
+    console.error(JSON.stringify({
+      level: "error",
+      service: "controlfile-backend",
+      environment: process.env.NODE_ENV || "production",
+      timestamp: new Date().toISOString(),
+      component: "getGitHubAccessToken",
+      errorType: "FIRESTORE_ERROR",
+      errorMessage: error instanceof Error ? error.message : "Error desconocido",
+      userId: uid,
+    }))
+    
+    // En lugar de lanzar el error, devolver null para que el endpoint pueda manejar
+    // el caso de "GitHub no conectado" con un 400 en lugar de un 500
+    // Solo lanzar si es un error crítico de autenticación
+    if (error instanceof Error) {
+      const errorMessage = error.message.toLowerCase()
+      // Si es un error de permisos o autenticación de Firestore, sí lanzar
+      if (errorMessage.includes("permission") || 
+          errorMessage.includes("unauthorized") ||
+          errorMessage.includes("unauthenticated")) {
+        throw error
+      }
+    }
+    
+    // Para otros errores (red, timeout, etc.), devolver null
+    // El endpoint manejará esto como "GitHub no conectado"
+    console.warn(`[AUTH] Devolviendo null debido a error no crítico al obtener access_token para usuario ${uid}`)
+    return null
   }
 }
 
