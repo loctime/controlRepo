@@ -15,11 +15,14 @@ import { getAuthenticatedUserId, getGitHubAccessToken } from "@/lib/auth/server-
  * Indexa un repositorio completo
  */
 export async function POST(request: NextRequest) {
+  console.log("[INDEX] ===== Inicio de indexación =====")
   try {
     // A) Autenticación: Verificar token Firebase y obtener UID
     let uid: string
     try {
+      console.log("[INDEX] Verificando autenticación...")
       uid = await getAuthenticatedUserId(request)
+      console.log(`[INDEX] Usuario autenticado: ${uid}`)
     } catch (error) {
       console.error("[INDEX] Error de autenticación:", error)
       return NextResponse.json(
@@ -29,16 +32,20 @@ export async function POST(request: NextRequest) {
     }
 
     // B) Obtener access_token de GitHub del usuario desde Firestore
+    console.log(`[INDEX] Obteniendo access_token de GitHub para usuario ${uid}...`)
     const accessToken = await getGitHubAccessToken(uid)
     if (!accessToken) {
+      console.error(`[INDEX] GitHub no conectado para usuario ${uid}`)
       return NextResponse.json(
         { error: "GitHub no conectado. Por favor, conecta tu cuenta de GitHub primero." },
         { status: 400 }
       )
     }
+    console.log(`[INDEX] Access_token de GitHub obtenido para usuario ${uid}`)
 
     const body = await request.json()
     const { owner, repo, branch } = body
+    console.log(`[INDEX] Parámetros recibidos: owner=${owner}, repo=${repo}, branch=${branch || "main"}`)
 
     // Validar parámetros
     if (!owner || !repo) {
@@ -67,8 +74,10 @@ export async function POST(request: NextRequest) {
     const repositoryId = createRepositoryId(owner, repo, finalBranch)
 
     // Intentar adquirir lock
+    console.log(`[INDEX] Intentando adquirir lock para ${repositoryId}...`)
     const lockAcquired = await acquireIndexLock(repositoryId, "system")
     if (!lockAcquired) {
+      console.log(`[INDEX] Lock no adquirido para ${repositoryId} (ya está siendo indexado)`)
       return NextResponse.json<IndexResponse>(
         {
           status: "error",
@@ -78,7 +87,9 @@ export async function POST(request: NextRequest) {
         { status: 409 }
       )
     }
+    console.log(`[INDEX] Lock adquirido para ${repositoryId}`)
 
+    let indexPromiseStarted = false
     try {
       const lastCommit = resolvedBranch.lastCommit
       const defaultBranch = repoMetadata.default_branch
@@ -137,47 +148,87 @@ export async function POST(request: NextRequest) {
       // Iniciar indexación de forma asíncrona
       // En producción, esto debería ejecutarse en un worker/queue
       console.log(`[INDEX] Indexing started for ${repositoryId}`)
-      indexRepository(owner, repo, accessToken, finalBranch)
-        .then(async (updatedIndex) => {
-          // Actualizar índice con los archivos procesados
-          updatedIndex.status = "completed"
-          await saveRepositoryIndex(updatedIndex)
-          console.log(`[INDEX] Indexing completed for ${repositoryId} (${updatedIndex.files.length} files)`)
-          
-          // Crear o obtener Project Brain
-          const brainExists = await hasProjectBrain(repositoryId)
-          let projectBrain = undefined
-          if (!brainExists) {
-            projectBrain = generateMinimalProjectBrain(updatedIndex)
-            await saveProjectBrain(projectBrain)
-            console.log(`[INDEX] Project Brain created for ${repositoryId}`)
-          } else {
-            // Obtener Project Brain existente para pasarlo a generateMetrics
-            const { getProjectBrain } = await import("@/lib/project-brain/storage-filesystem")
-            projectBrain = await getProjectBrain(repositoryId) || undefined
-          }
-          
-          // Generar y guardar métricas
-          const metrics = generateMetrics(updatedIndex, projectBrain)
-          await saveMetrics(repositoryId, metrics)
-          console.log(`[INDEX] Metrics generated for ${repositoryId}`)
-          
-          // Liberar lock
+      
+      // Proteger contra errores sincrónicos al llamar indexRepository
+      let indexPromise: Promise<any>
+      try {
+        indexPromise = indexRepository(owner, repo, accessToken, finalBranch)
+        indexPromiseStarted = true
+        console.log(`[INDEX] Promesa de indexación iniciada para ${repositoryId}`)
+      } catch (syncError) {
+        console.error(`[INDEX] Error sincrónico al iniciar indexación para ${repositoryId}:`, syncError)
+        // Liberar lock antes de lanzar el error
+        try {
           await releaseIndexLock(repositoryId)
+          console.log(`[INDEX] Lock liberado después de error sincrónico para ${repositoryId}`)
+        } catch (lockError) {
+          console.error(`[INDEX] Error al liberar lock después de error sincrónico para ${repositoryId}:`, lockError)
+        }
+        throw syncError
+      }
+
+      // Manejar la promesa de indexación de forma asíncrona
+      indexPromise
+        .then(async (updatedIndex) => {
+          try {
+            // Actualizar índice con los archivos procesados
+            updatedIndex.status = "completed"
+            await saveRepositoryIndex(updatedIndex)
+            console.log(`[INDEX] Indexing completed for ${repositoryId} (${updatedIndex.files.length} files)`)
+            
+            // Crear o obtener Project Brain
+            const brainExists = await hasProjectBrain(repositoryId)
+            let projectBrain = undefined
+            if (!brainExists) {
+              projectBrain = generateMinimalProjectBrain(updatedIndex)
+              await saveProjectBrain(projectBrain)
+              console.log(`[INDEX] Project Brain created for ${repositoryId}`)
+            } else {
+              // Obtener Project Brain existente para pasarlo a generateMetrics
+              const { getProjectBrain } = await import("@/lib/project-brain/storage-filesystem")
+              projectBrain = await getProjectBrain(repositoryId) || undefined
+            }
+            
+            // Generar y guardar métricas
+            const metrics = generateMetrics(updatedIndex, projectBrain)
+            await saveMetrics(repositoryId, metrics)
+            console.log(`[INDEX] Metrics generated for ${repositoryId}`)
+          } catch (error) {
+            console.error(`[INDEX] Error en el procesamiento post-indexación para ${repositoryId}:`, error)
+          } finally {
+            // Liberar lock siempre, incluso si hay errores
+            try {
+              await releaseIndexLock(repositoryId)
+              console.log(`[INDEX] Lock liberado después de completar indexación para ${repositoryId}`)
+            } catch (lockError) {
+              console.error(`[INDEX] Error al liberar lock después de completar indexación para ${repositoryId}:`, lockError)
+            }
+          }
         })
         .catch(async (error) => {
           console.error(`[INDEX] Error indexing ${repositoryId}:`, error)
-          // Actualizar índice con estado de error
-          const existingIndex = await getRepositoryIndex(repositoryId)
-          if (existingIndex) {
-            existingIndex.status = "error"
-            await saveRepositoryIndex(existingIndex)
+          try {
+            // Actualizar índice con estado de error
+            const existingIndex = await getRepositoryIndex(repositoryId)
+            if (existingIndex) {
+              existingIndex.status = "error"
+              await saveRepositoryIndex(existingIndex)
+            }
+          } catch (updateError) {
+            console.error(`[INDEX] Error al actualizar índice con estado de error para ${repositoryId}:`, updateError)
+          } finally {
+            // Liberar lock en caso de error
+            try {
+              await releaseIndexLock(repositoryId)
+              console.log(`[INDEX] Lock liberado después de error en indexación para ${repositoryId}`)
+            } catch (lockError) {
+              console.error(`[INDEX] Error al liberar lock después de error en indexación para ${repositoryId}:`, lockError)
+            }
           }
-          // Liberar lock en caso de error
-          await releaseIndexLock(repositoryId)
         })
 
       // Retornar inmediatamente (indexación en background)
+      // El lock será liberado por la promesa asíncrona (then/catch)
       return NextResponse.json<IndexResponse>(
         {
           status: "indexing",
@@ -187,12 +238,24 @@ export async function POST(request: NextRequest) {
         { status: 202 }
       )
     } catch (error) {
-      // Liberar lock si hay error al iniciar
-      await releaseIndexLock(repositoryId)
+      console.error(`[INDEX] Error en el bloque try principal para ${repositoryId}:`, error)
+      // Liberar lock solo si la promesa no se inició (error antes de iniciar indexRepository)
+      if (!indexPromiseStarted) {
+        try {
+          await releaseIndexLock(repositoryId)
+          console.log(`[INDEX] Lock liberado en catch principal (promesa no iniciada) para ${repositoryId}`)
+        } catch (lockError) {
+          console.error(`[INDEX] Error al liberar lock en catch principal para ${repositoryId}:`, lockError)
+        }
+      } else {
+        console.log(`[INDEX] Lock NO liberado en catch principal porque la promesa ya se inició para ${repositoryId}`)
+      }
       throw error
     }
   } catch (error) {
-    console.error("Error en POST /api/repository/index:", error)
+    console.error("[INDEX] ===== Error en POST /api/repository/index =====")
+    console.error("[INDEX] Error:", error)
+    console.error("[INDEX] Stack:", error instanceof Error ? error.stack : "No stack disponible")
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Error desconocido",

@@ -15,56 +15,107 @@ let db: Firestore | undefined
  * Inicializa Firebase Admin SDK
  */
 function initializeFirebaseAdmin(): { auth: Auth; db: Firestore } {
+  // Log: Verificar si ya está inicializado en memoria
   if (auth && db) {
+    console.log("[AUTH] Firebase Admin ya inicializado en memoria, reutilizando instancia")
     return { auth, db }
   }
 
-  // Verificar si ya está inicializado
-  if (getApps().length > 0) {
-    app = getApps()[0]
+  // Log: Verificar si ya está inicializado en getApps()
+  const existingApps = getApps()
+  if (existingApps.length > 0) {
+    console.log(`[AUTH] Firebase Admin ya inicializado en getApps() (${existingApps.length} app(s)), reutilizando`)
+    app = existingApps[0]
     auth = getAuth(app)
     db = getFirestore(app)
     return { auth, db }
   }
 
+  // Log: Verificar existencia de FIREBASE_SERVICE_ACCOUNT_KEY
+  const serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY
+  console.log("[AUTH] Verificando configuración de Firebase Admin SDK...")
+  console.log(`[AUTH] FIREBASE_SERVICE_ACCOUNT_KEY existe: ${!!serviceAccountKey}`)
+  console.log(`[AUTH] FIREBASE_SERVICE_ACCOUNT_KEY longitud: ${serviceAccountKey?.length || 0}`)
+  console.log(`[AUTH] GOOGLE_APPLICATION_CREDENTIALS existe: ${!!process.env.GOOGLE_APPLICATION_CREDENTIALS}`)
+
   // Inicializar con credenciales desde variables de entorno
   // Para producción, usar GOOGLE_APPLICATION_CREDENTIALS o service account JSON
-  const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_KEY
-    ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY)
-    : undefined
+  let serviceAccount: any = undefined
+  
+  if (serviceAccountKey) {
+    try {
+      console.log("[AUTH] Intentando parsear FIREBASE_SERVICE_ACCOUNT_KEY como JSON...")
+      serviceAccount = JSON.parse(serviceAccountKey)
+      console.log("[AUTH] ✅ JSON parseado correctamente")
+      console.log(`[AUTH] Service Account project_id: ${serviceAccount?.project_id || "NO ENCONTRADO"}`)
+    } catch (parseError) {
+      console.error("[AUTH] ❌ Error al parsear FIREBASE_SERVICE_ACCOUNT_KEY:", parseError)
+      console.error(`[AUTH] Primeros 100 caracteres del valor: ${serviceAccountKey.substring(0, 100)}...`)
+      throw new Error(
+        `Error al parsear FIREBASE_SERVICE_ACCOUNT_KEY como JSON: ${parseError instanceof Error ? parseError.message : "Error desconocido"}`
+      )
+    }
+  }
 
   if (!serviceAccount && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     // En desarrollo, intentar usar las credenciales del proyecto
     // Si no están disponibles, usar emulador o fallback
     console.warn(
-      "⚠️ FIREBASE_SERVICE_ACCOUNT_KEY o GOOGLE_APPLICATION_CREDENTIALS no configurado. " +
+      "[AUTH] ⚠️ FIREBASE_SERVICE_ACCOUNT_KEY o GOOGLE_APPLICATION_CREDENTIALS no configurado. " +
       "Usando inicialización con projectId solamente."
     )
 
     const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
     if (!projectId) {
+      console.error("[AUTH] ❌ NEXT_PUBLIC_FIREBASE_PROJECT_ID no está configurado")
       throw new Error(
         "NEXT_PUBLIC_FIREBASE_PROJECT_ID no está configurado. " +
         "Necesitas configurar Firebase Admin SDK."
       )
     }
 
-    app = initializeApp({
-      projectId,
-    })
+    console.log(`[AUTH] Inicializando Firebase Admin con projectId: ${projectId}`)
+    try {
+      app = initializeApp({
+        projectId,
+      })
+      console.log("[AUTH] ✅ Firebase Admin inicializado con projectId")
+    } catch (initError) {
+      console.error("[AUTH] ❌ Error al inicializar Firebase Admin con projectId:", initError)
+      throw initError
+    }
   } else if (serviceAccount) {
-    app = initializeApp({
-      credential: cert(serviceAccount),
-    })
+    console.log("[AUTH] Inicializando Firebase Admin con service account...")
+    try {
+      app = initializeApp({
+        credential: cert(serviceAccount),
+      })
+      console.log("[AUTH] ✅ Firebase Admin inicializado con service account")
+    } catch (initError) {
+      console.error("[AUTH] ❌ Error al inicializar Firebase Admin con service account:", initError)
+      throw initError
+    }
   } else {
     // Usar GOOGLE_APPLICATION_CREDENTIALS
-    app = initializeApp()
+    console.log("[AUTH] Inicializando Firebase Admin con GOOGLE_APPLICATION_CREDENTIALS...")
+    try {
+      app = initializeApp()
+      console.log("[AUTH] ✅ Firebase Admin inicializado con GOOGLE_APPLICATION_CREDENTIALS")
+    } catch (initError) {
+      console.error("[AUTH] ❌ Error al inicializar Firebase Admin con GOOGLE_APPLICATION_CREDENTIALS:", initError)
+      throw initError
+    }
   }
 
-  auth = getAuth(app)
-  db = getFirestore(app)
-
-  return { auth, db }
+  try {
+    auth = getAuth(app)
+    db = getFirestore(app)
+    console.log("[AUTH] ✅ Auth y Firestore obtenidos exitosamente")
+    return { auth, db }
+  } catch (error) {
+    console.error("[AUTH] ❌ Error al obtener Auth o Firestore:", error)
+    throw error
+  }
 }
 
 /**
