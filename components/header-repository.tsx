@@ -275,10 +275,22 @@ export function HeaderRepository() {
               <Button
                 size="icon-sm"
                 variant={githubConnected ? "secondary" : "ghost"}
-                onClick={() => {
+                onClick={async () => {
                   if (!githubConnected) {
-                    window.location.href =
-                      `${process.env.NEXT_PUBLIC_CONTROLFILE_URL}/api/auth/github`
+                    try {
+                      const auth = getAuth()
+                      const user = auth.currentUser
+                      if (!user) {
+                        console.error("Usuario no autenticado")
+                        return
+                      }
+                      const token = await user.getIdToken()
+                      // Pasar el token como query parameter para el flujo OAuth
+                      window.location.href =
+                        `${process.env.NEXT_PUBLIC_CONTROLFILE_URL}/api/auth/github?token=${encodeURIComponent(token)}`
+                    } catch (error) {
+                      console.error("Error al obtener token para GitHub OAuth:", error)
+                    }
                   }
                 }}
                 className="h-6 w-6"
