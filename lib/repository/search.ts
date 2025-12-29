@@ -39,3 +39,4 @@ export function searchFiles(files: IndexedFile[], query: string): IndexedFile[] 
 
 
 
+
