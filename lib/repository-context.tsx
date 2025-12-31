@@ -3,7 +3,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from "react"
 import { RepositoryIndex, IndexedFile, FileCategory, FileType } from "./types/repository"
 import { RepositoryMetrics } from "./types/repository-metrics"
-import { parseRepositoryId } from "./repository/utils"
 import { searchFiles as searchFilesUtil } from "./repository/search"
 import { useAuth } from "./auth-context"
 import { getAuth } from "firebase/auth"
@@ -207,75 +206,63 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
           const data = await response.json()
 
-          // Verificar si es un RepositoryIndex completo (tiene la propiedad 'files')
-          // o una respuesta parcial (solo tiene 'repositoryId' y 'status')
-          if ("files" in data) {
-            // Es un RepositoryIndex completo
-            const index = data as RepositoryIndex
-            setCurrentIndex(index)
-            // Normalizar repositoryId al formato github:owner:repo
-            const normalizedRepoId = index.id.startsWith("github:") 
-              ? index.id 
-              : buildRepositoryId(index.owner, index.repo)
-            setRepositoryId(normalizedRepoId)
+          // El endpoint /status solo devuelve metadata (status, repositoryId, stats, owner, repo, indexedAt)
+          // NO devuelve files - currentIndex solo se setea cuando hay un índice completo real
+          const statusResponse = data as { 
+            repositoryId: string
+            status: string
+            owner?: string
+            repo?: string
+            stats?: { totalFiles?: number }
+            indexedAt?: string
+          }
+          
+          // Normalizar repositoryId al formato github:owner:repo
+          const normalizedRepoId = statusResponse.repositoryId.startsWith("github:") 
+            ? statusResponse.repositoryId 
+            : buildRepositoryId(owner, repo)
+          setRepositoryId(normalizedRepoId)
 
-            // Si el estado del índice cambió a "completed" o "error", detener polling
-            if (index.status === "completed") {
-              // Verificar si acabamos de completar (transición de indexing a completed)
-              const wasIndexing = status === "indexing"
-              
-              setStatus("completed")
-              
-              // Mostrar notificación cuando se completa la indexación
-              if (wasIndexing) {
-                toast.success("Repositorio indexado correctamente", {
-                  description: `El repositorio ${index.owner}/${index.repo} ha sido indexado exitosamente. ${index.files?.length || 0} archivos procesados.`,
-                  duration: 5000,
-                })
-              }
-              
-              // Actualizar preferencias cuando se completa la indexación
-              updateUserPreferences(index.id).catch((err) => {
-                console.error("Error al actualizar preferencias:", err)
+          if (statusResponse.status === "completed") {
+            // Verificar si acabamos de completar (transición de indexing a completed)
+            const wasIndexing = status === "indexing"
+            
+            setStatus("completed")
+            
+            // Mostrar notificación cuando se completa la indexación
+            if (wasIndexing) {
+              const fileCount = statusResponse.stats?.totalFiles || 0
+              toast.success("Repositorio indexado correctamente", {
+                description: `El repositorio ${statusResponse.owner || owner}/${statusResponse.repo || repo} ha sido indexado exitosamente. ${fileCount} archivos procesados.`,
+                duration: 5000,
               })
-              // Cargar métricas cuando el índice está completado
-              const parsed = parseRepositoryId(index.id)
-              if (parsed) {
-                loadMetrics(parsed.owner, parsed.repo, parsed.branch).catch((err) => {
-                  console.error("Error al cargar métricas:", err)
-                })
-              }
-              // Detener polling cuando se completa
-              stopPolling()
-            } else if (index.status === "error") {
-              setStatus("error")
-              setError("Error durante la indexación")
-              stopPolling()
-            } else {
-              // Aún está indexando
-              setStatus("indexing")
             }
-          } else {
-            // Es una respuesta parcial (indexing o not_found)
-            const partialResponse = data as { repositoryId: string; status: string }
-            // Normalizar repositoryId al formato github:owner:repo si viene en otro formato
-            const normalizedRepoId = partialResponse.repositoryId.startsWith("github:") 
-              ? partialResponse.repositoryId 
-              : buildRepositoryId(owner, repo)
-            setRepositoryId(normalizedRepoId)
-
-            if (partialResponse.status === "indexing") {
-              // Está indexando pero el índice aún no existe
-              setCurrentIndex(null)
-              setCurrentMetrics(null)
-              setStatus("indexing")
-            } else if (partialResponse.status === "not_found") {
-              // No existe índice y tampoco está indexando
-              setCurrentIndex(null)
-              setCurrentMetrics(null)
-              setStatus("idle")
-              stopPolling()
-            }
+            
+            // Actualizar preferencias cuando se completa la indexación
+            updateUserPreferences(normalizedRepoId).catch((err) => {
+              console.error("Error al actualizar preferencias:", err)
+            })
+            // Cargar métricas cuando el índice está completado (usar owner/repo que ya tenemos)
+            loadMetrics(owner, repo).catch((err) => {
+              console.error("Error al cargar métricas:", err)
+            })
+            // Detener polling cuando se completa
+            stopPolling()
+          } else if (statusResponse.status === "error") {
+            setStatus("error")
+            setError("Error durante la indexación")
+            stopPolling()
+          } else if (statusResponse.status === "indexing") {
+            // Está indexando
+            setCurrentIndex(null)
+            setCurrentMetrics(null)
+            setStatus("indexing")
+          } else if (statusResponse.status === "not_found") {
+            // No existe índice y tampoco está indexando
+            setCurrentIndex(null)
+            setCurrentMetrics(null)
+            setStatus("idle")
+            stopPolling()
           }
         } catch (err) {
           console.error("Error en polling:", err)
@@ -423,63 +410,50 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
         const data = await response.json()
 
-        // Verificar si es un RepositoryIndex completo (tiene la propiedad 'files')
-        // o una respuesta parcial (solo tiene 'repositoryId' y 'status')
-        if ("files" in data) {
-          // Es un RepositoryIndex completo
-          const index = data as RepositoryIndex
-          setCurrentIndex(index)
-          // Normalizar repositoryId al formato github:owner:repo
-          const normalizedRepoId = index.id.startsWith("github:") 
-            ? index.id 
-            : buildRepositoryId(index.owner, index.repo)
-          setRepositoryId(normalizedRepoId)
+        // El endpoint /status solo devuelve metadata (status, repositoryId, stats, owner, repo, indexedAt)
+        // NO devuelve files - currentIndex solo se setea cuando hay un índice completo real
+        const statusResponse = data as { 
+          repositoryId: string
+          status: string
+          owner?: string
+          repo?: string
+          stats?: { totalFiles?: number }
+          indexedAt?: string
+        }
+        
+        // Normalizar repositoryId al formato github:owner:repo
+        const normalizedRepoId = statusResponse.repositoryId.startsWith("github:") 
+          ? statusResponse.repositoryId 
+          : buildRepositoryId(owner, repo)
+        setRepositoryId(normalizedRepoId)
 
-          // Actualizar status según el estado del índice
-          if (index.status === "indexing") {
-            setStatus("indexing")
-            // Si está indexando, iniciar polling (solo si no hay uno activo)
-            if (!pollingRef.current.intervalId) {
-              startPolling(owner, repo)
-            }
-          } else if (index.status === "completed") {
-            setStatus("completed")
-            // Actualizar preferencias cuando se restaura un repositorio completado
-            await updateUserPreferences(repositoryId)
-            // Cargar métricas cuando el índice está completado
-            await loadMetrics(owner, repo, branch)
-          } else {
-            setStatus("error")
-            setError("Error en el índice")
+        if (statusResponse.status === "indexing") {
+          // Está indexando
+          setCurrentIndex(null)
+          setCurrentMetrics(null)
+          setStatus("indexing")
+          // Actualizar preferencias aunque esté indexando
+          await updateUserPreferences(normalizedRepoId)
+          // Iniciar polling (solo si no hay uno activo)
+          if (!pollingRef.current.intervalId) {
+            startPolling(owner, repo)
           }
+        } else if (statusResponse.status === "completed") {
+          setStatus("completed")
+          // Actualizar preferencias cuando se restaura un repositorio completado
+          await updateUserPreferences(repositoryId)
+          // Cargar métricas cuando el índice está completado (usar owner/repo que ya tenemos)
+          await loadMetrics(owner, repo, branch)
+        } else if (statusResponse.status === "not_found") {
+          // No existe índice y tampoco está indexando
+          setCurrentIndex(null)
+          setCurrentMetrics(null)
+          setStatus("idle")
+          // Limpiar preferencias si el repositorio no existe
+          await updateUserPreferences(null)
         } else {
-          // Es una respuesta parcial (indexing o not_found)
-          const partialResponse = data as { repositoryId: string; status: string }
-          // Normalizar repositoryId al formato github:owner:repo si viene en otro formato
-          const normalizedRepoId = partialResponse.repositoryId.startsWith("github:") 
-            ? partialResponse.repositoryId 
-            : buildRepositoryId(owner, repo)
-          setRepositoryId(normalizedRepoId)
-
-          if (partialResponse.status === "indexing") {
-            // Está indexando pero el índice aún no existe
-            setCurrentIndex(null)
-            setCurrentMetrics(null)
-            setStatus("indexing")
-            // Actualizar preferencias aunque esté indexando
-            await updateUserPreferences(normalizedRepoId)
-            // Iniciar polling (solo si no hay uno activo)
-            if (!pollingRef.current.intervalId) {
-              startPolling(owner, repo)
-            }
-          } else if (partialResponse.status === "not_found") {
-            // No existe índice y tampoco está indexando
-            setCurrentIndex(null)
-            setCurrentMetrics(null)
-            setStatus("idle")
-            // Limpiar preferencias si el repositorio no existe
-            await updateUserPreferences(null)
-          }
+          setStatus("error")
+          setError("Error en el índice")
         }
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Error desconocido al refrescar"
