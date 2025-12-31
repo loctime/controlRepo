@@ -12,3 +12,9 @@ match /apps/controlrepo/{userId}/githubIntegration {
   // Permitir lectura/escritura solo al usuario autenticado que es dueño
   allow read, write: if isAuth() && uid() == userId;
 }
+
+// Documento específico para preferencias de usuario: apps/controlrepo/{userId}/preferences
+match /apps/controlrepo/{userId}/preferences {
+  // Permitir lectura/escritura solo al usuario autenticado que es dueño
+  allow read, write: if isAuth() && uid() == userId;
+}

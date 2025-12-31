@@ -1,12 +1,11 @@
 /**
- * Persistencia de preferencias de usuario usando sistema de archivos
+ * Persistencia de preferencias de usuario usando Firestore
  * Almacena el repositorio activo por usuario
+ * Namespace: /apps/controlrepo/{userId}/preferences
  */
 
-import { writeFile, readFile, mkdir, unlink, rename } from "fs/promises"
-import { join } from "path"
-
-const STORAGE_DIR = join(process.cwd(), ".user-preferences")
+import { initializeFirebaseAdmin } from "@/lib/auth/server-auth"
+import { FieldValue } from "firebase-admin/firestore"
 
 export interface UserPreferences {
   userId: string
@@ -14,58 +13,53 @@ export interface UserPreferences {
   updatedAt: string
 }
 
-// Asegurar que el directorio exista
-async function ensureDir() {
-  try {
-    await mkdir(STORAGE_DIR, { recursive: true })
-  } catch (error) {
-    // Ignorar si ya existe
-  }
-}
-
 /**
- * Obtiene las preferencias de un usuario
+ * Obtiene las preferencias de un usuario desde Firestore
  */
 export async function getUserPreferences(userId: string): Promise<UserPreferences | null> {
-  await ensureDir()
-  const filePath = join(STORAGE_DIR, `${userId}.json`)
+  const { db } = initializeFirebaseAdmin()
 
   try {
-    const content = await readFile(filePath, "utf-8")
-    return JSON.parse(content) as UserPreferences
-  } catch (error: any) {
-    // Si el archivo no existe, retornar null
-    if (error?.code === "ENOENT") {
+    const docPath = `apps/controlrepo/${userId}/preferences`
+    const docRef = db.doc(docPath)
+    const doc = await docRef.get()
+
+    if (!doc.exists) {
       return null
     }
-    // Otro error, retornar null también
+
+    const data = doc.data()
+    if (!data) {
+      return null
+    }
+
+    return {
+      userId,
+      activeRepositoryId: data.activeRepositoryId || null,
+      updatedAt: data.updatedAt?.toDate?.()?.toISOString() || data.updatedAt || new Date().toISOString(),
+    }
+  } catch (error) {
     console.error(`Error al leer preferencias de usuario ${userId}:`, error)
     return null
   }
 }
 
 /**
- * Guarda las preferencias de un usuario
+ * Guarda las preferencias de un usuario en Firestore
  */
 export async function saveUserPreferences(preferences: UserPreferences): Promise<void> {
-  await ensureDir()
-  const filePath = join(STORAGE_DIR, `${preferences.userId}.json`)
-  const tempPath = join(STORAGE_DIR, `${preferences.userId}.json.tmp`)
+  const { db } = initializeFirebaseAdmin()
 
   try {
-    // Escribir a archivo temporal primero
-    const content = JSON.stringify(preferences, null, 2)
-    await writeFile(tempPath, content, "utf-8")
+    const docPath = `apps/controlrepo/${preferences.userId}/preferences`
+    const docRef = db.doc(docPath)
 
-    // Renombrar atómicamente al archivo final
-    await rename(tempPath, filePath)
+    await docRef.set({
+      activeRepositoryId: preferences.activeRepositoryId,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true })
   } catch (error) {
-    // Limpiar archivo temporal si hay error
-    try {
-      await unlink(tempPath).catch(() => {})
-    } catch {
-      // Ignorar errores de limpieza
-    }
+    console.error(`Error al guardar preferencias de usuario ${preferences.userId}:`, error)
     throw error
   }
 }
@@ -74,8 +68,6 @@ export async function saveUserPreferences(preferences: UserPreferences): Promise
  * Actualiza el repositorio activo de un usuario
  */
 export async function updateActiveRepository(userId: string, repositoryId: string | null): Promise<void> {
-  const existing = await getUserPreferences(userId)
-  
   const preferences: UserPreferences = {
     userId,
     activeRepositoryId: repositoryId,
