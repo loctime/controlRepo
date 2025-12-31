@@ -8,11 +8,15 @@ import { NextRequest, NextResponse } from "next/server"
  * Este endpoint actúa como proxy para consultar el estado desde el backend correcto.
  */
 export async function GET(request: NextRequest) {
+  console.log("[STATUS] GET /api/repository/status - Endpoint llamado")
+  
   try {
     const searchParams = request.nextUrl.searchParams
     const owner = searchParams.get("owner")
     const repo = searchParams.get("repo")
     const branch = searchParams.get("branch")
+    
+    console.log(`[STATUS] Parámetros recibidos: owner=${owner}, repo=${repo}, branch=${branch}`)
 
     // Validar parámetros
     if (!owner || !repo) {
