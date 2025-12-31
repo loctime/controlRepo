@@ -107,13 +107,23 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
       if (!user?.uid) return
 
       try {
+        // Obtener token de autenticación
+        const auth = getAuth()
+        const currentUser = auth.currentUser
+        if (!currentUser) {
+          console.error("No hay usuario autenticado para actualizar preferencias")
+          return
+        }
+
+        const token = await currentUser.getIdToken()
+
         await fetch("/api/user/preferences", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
           },
           body: JSON.stringify({
-            userId: user.uid,
             activeRepositoryId,
           }),
         })
@@ -430,7 +440,22 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
     const restoreActiveRepository = async () => {
       try {
-        const response = await fetch(`/api/user/preferences?userId=${encodeURIComponent(user.uid)}`)
+        // Obtener token de autenticación
+        const auth = getAuth()
+        const currentUser = auth.currentUser
+        if (!currentUser) {
+          console.error("No hay usuario autenticado para restaurar preferencias")
+          setPreferencesLoaded(true)
+          return
+        }
+
+        const token = await currentUser.getIdToken()
+
+        const response = await fetch("/api/user/preferences", {
+          headers: {
+            "Authorization": `Bearer ${token}`,
+          },
+        })
         if (!response.ok) {
           console.error("Error al obtener preferencias de usuario")
           setPreferencesLoaded(true)
