@@ -37,6 +37,30 @@ const RepositoryContext = createContext<RepositoryContextType | undefined>(undef
 
 const POLLING_INTERVAL = 4000 // 4 segundos (entre 3-5 segundos)
 
+/**
+ * Construye repositoryId en formato: github:owner:repo
+ */
+function buildRepositoryId(owner: string, repo: string): string {
+  return `github:${owner}:${repo}`
+}
+
+/**
+ * Parsea repositoryId en formato: github:owner:repo
+ */
+function parseRepositoryIdFromPrefs(repositoryId: string): { owner: string; repo: string } | null {
+  if (!repositoryId.startsWith("github:")) {
+    // Compatibilidad con formato antiguo: owner/repo
+    const parts = repositoryId.split("/")
+    if (parts.length === 2) {
+      return { owner: parts[0], repo: parts[1] }
+    }
+    return null
+  }
+  const parts = repositoryId.replace("github:", "").split(":")
+  if (parts.length !== 2) return null
+  return { owner: parts[0], repo: parts[1] }
+}
+
 export function RepositoryProvider({ children }: { children: React.ReactNode }) {
   const [currentIndex, setCurrentIndex] = useState<RepositoryIndex | null>(null)
   const [currentMetrics, setCurrentMetrics] = useState<RepositoryMetrics | null>(null)
@@ -50,14 +74,10 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
   // Ref para almacenar información del polling
   const pollingRef = useRef<{
     intervalId: ReturnType<typeof setInterval> | null
-    owner: string | null
-    repo: string | null
-    branch: string | null
+    repositoryId: string | null
   }>({
     intervalId: null,
-    owner: null,
-    repo: null,
-    branch: null,
+    repositoryId: null,
   })
 
   // Limpiar polling al desmontar
@@ -149,28 +169,37 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
       clearInterval(pollingRef.current.intervalId)
       pollingRef.current.intervalId = null
     }
-    pollingRef.current.owner = null
-    pollingRef.current.repo = null
-    pollingRef.current.branch = null
+    pollingRef.current.repositoryId = null
   }, [])
 
   /**
    * Inicia polling automático para verificar el estado de indexación
    */
   const startPolling = useCallback(
-    (owner: string, repo: string, branch: string) => {
+    (owner: string, repo: string) => {
       // Detener polling anterior si existe
       stopPolling()
 
-      pollingRef.current.owner = owner
-      pollingRef.current.repo = repo
-      pollingRef.current.branch = branch
+      const repositoryId = buildRepositoryId(owner, repo)
+      pollingRef.current.repositoryId = repositoryId
 
       const poll = async () => {
         try {
           const response = await fetch(
-            `/api/repository/status?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&branch=${encodeURIComponent(branch)}`
+            `/api/repository/status/${repositoryId}`
           )
+
+          // Manejar 404 como "not_found" en lugar de error
+          if (response.status === 404) {
+            setCurrentIndex(null)
+            setCurrentMetrics(null)
+            setStatus("idle")
+            // No detener polling si está indexando (puede ser que aún no exista el índice)
+            if (status !== "indexing") {
+              stopPolling()
+            }
+            return
+          }
 
           if (!response.ok) {
             throw new Error(`Error al obtener estado: ${response.statusText}`)
@@ -184,7 +213,11 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
             // Es un RepositoryIndex completo
             const index = data as RepositoryIndex
             setCurrentIndex(index)
-            setRepositoryId(index.id)
+            // Normalizar repositoryId al formato github:owner:repo
+            const normalizedRepoId = index.id.startsWith("github:") 
+              ? index.id 
+              : buildRepositoryId(index.owner, index.repo)
+            setRepositoryId(normalizedRepoId)
 
             // Si el estado del índice cambió a "completed" o "error", detener polling
             if (index.status === "completed") {
@@ -193,9 +226,9 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
               
               setStatus("completed")
               
-              // Mostrar notificación si acabamos de completar
+              // Mostrar notificación cuando se completa la indexación
               if (wasIndexing) {
-                toast.success("Indexación completada", {
+                toast.success("Repositorio indexado correctamente", {
                   description: `El repositorio ${index.owner}/${index.repo} ha sido indexado exitosamente. ${index.files?.length || 0} archivos procesados.`,
                   duration: 5000,
                 })
@@ -212,6 +245,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
                   console.error("Error al cargar métricas:", err)
                 })
               }
+              // Detener polling cuando se completa
               stopPolling()
             } else if (index.status === "error") {
               setStatus("error")
@@ -224,7 +258,11 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
           } else {
             // Es una respuesta parcial (indexing o not_found)
             const partialResponse = data as { repositoryId: string; status: string }
-            setRepositoryId(partialResponse.repositoryId)
+            // Normalizar repositoryId al formato github:owner:repo si viene en otro formato
+            const normalizedRepoId = partialResponse.repositoryId.startsWith("github:") 
+              ? partialResponse.repositoryId 
+              : buildRepositoryId(owner, repo)
+            setRepositoryId(normalizedRepoId)
 
             if (partialResponse.status === "indexing") {
               // Está indexando pero el índice aún no existe
@@ -253,7 +291,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         poll()
       }, POLLING_INTERVAL)
       },
-      [stopPolling, updateUserPreferences, loadMetrics]
+      [stopPolling, updateUserPreferences, loadMetrics, status]
     )
 
   /**
@@ -264,7 +302,8 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
       setLoading(true)
       setError(null)
       setStatus("indexing")
-      setRepositoryId(`${owner}/${repo}`)
+      const repositoryId = buildRepositoryId(owner, repo)
+      setRepositoryId(repositoryId)
       setCurrentIndex(null)
       setCurrentMetrics(null)
 
@@ -296,10 +335,10 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         const data = await response.json()
 
         // Actualizar preferencias del usuario
-        await updateUserPreferences(`${owner}/${repo}`)
+        await updateUserPreferences(repositoryId)
 
-        // Iniciar polling automático
-        startPolling(owner, repo, branch)
+        // Iniciar polling automático (sin branch)
+        startPolling(owner, repo)
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Error desconocido al indexar"
         setError(errorMessage)
@@ -323,7 +362,8 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
       setLoading(true)
       setError(null)
       setStatus("indexing")
-      setRepositoryId(`${owner}/${repo}`)
+      const repositoryId = buildRepositoryId(owner, repo)
+      setRepositoryId(repositoryId)
       setCurrentIndex(null)
       setCurrentMetrics(null)
 
@@ -344,10 +384,10 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         const data = await response.json()
 
         // Actualizar preferencias del usuario
-        await updateUserPreferences(`${owner}/${repo}`)
+        await updateUserPreferences(repositoryId)
 
-        // Iniciar polling automático
-        startPolling(owner, repo, branch)
+        // Iniciar polling automático (sin branch)
+        startPolling(owner, repo)
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Error desconocido al re-indexar"
         setError(errorMessage)
@@ -372,8 +412,9 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
       setError(null)
 
       try {
+        const repositoryId = buildRepositoryId(owner, repo)
         const response = await fetch(
-          `/api/repository/status?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&branch=${encodeURIComponent(branch)}`
+          `/api/repository/status/${repositoryId}`
         )
 
         if (!response.ok) {
@@ -388,19 +429,23 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
           // Es un RepositoryIndex completo
           const index = data as RepositoryIndex
           setCurrentIndex(index)
-          setRepositoryId(index.id)
+          // Normalizar repositoryId al formato github:owner:repo
+          const normalizedRepoId = index.id.startsWith("github:") 
+            ? index.id 
+            : buildRepositoryId(index.owner, index.repo)
+          setRepositoryId(normalizedRepoId)
 
           // Actualizar status según el estado del índice
           if (index.status === "indexing") {
             setStatus("indexing")
             // Si está indexando, iniciar polling (solo si no hay uno activo)
             if (!pollingRef.current.intervalId) {
-              startPolling(owner, repo, branch)
+              startPolling(owner, repo)
             }
           } else if (index.status === "completed") {
             setStatus("completed")
             // Actualizar preferencias cuando se restaura un repositorio completado
-            await updateUserPreferences(index.id)
+            await updateUserPreferences(repositoryId)
             // Cargar métricas cuando el índice está completado
             await loadMetrics(owner, repo, branch)
           } else {
@@ -410,7 +455,11 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         } else {
           // Es una respuesta parcial (indexing o not_found)
           const partialResponse = data as { repositoryId: string; status: string }
-          setRepositoryId(partialResponse.repositoryId)
+          // Normalizar repositoryId al formato github:owner:repo si viene en otro formato
+          const normalizedRepoId = partialResponse.repositoryId.startsWith("github:") 
+            ? partialResponse.repositoryId 
+            : buildRepositoryId(owner, repo)
+          setRepositoryId(normalizedRepoId)
 
           if (partialResponse.status === "indexing") {
             // Está indexando pero el índice aún no existe
@@ -418,10 +467,10 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
             setCurrentMetrics(null)
             setStatus("indexing")
             // Actualizar preferencias aunque esté indexando
-            await updateUserPreferences(partialResponse.repositoryId)
+            await updateUserPreferences(normalizedRepoId)
             // Iniciar polling (solo si no hay uno activo)
             if (!pollingRef.current.intervalId) {
-              startPolling(owner, repo, branch)
+              startPolling(owner, repo)
             }
           } else if (partialResponse.status === "not_found") {
             // No existe índice y tampoco está indexando
@@ -477,12 +526,12 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
         const preferences = await response.json()
         if (preferences.activeRepositoryId) {
-          // Parsear repositoryId (formato: "owner/repo")
-          const [owner, repo] = preferences.activeRepositoryId.split("/")
-          if (owner && repo) {
+          // Parsear repositoryId (formato: "github:owner:repo" o "owner/repo" para compatibilidad)
+          const parsed = parseRepositoryIdFromPrefs(preferences.activeRepositoryId)
+          if (parsed) {
             // Restaurar el repositorio usando refreshStatus
             // Esto cargará el índice completo si existe
-            await refreshStatus(owner, repo)
+            await refreshStatus(parsed.owner, parsed.repo)
           }
         }
       } catch (err) {

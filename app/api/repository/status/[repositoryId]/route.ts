@@ -1,27 +1,27 @@
 import { NextRequest, NextResponse } from "next/server"
 
 /**
- * GET /api/repository/status
+ * GET /api/repository/status/:repositoryId
  * Proxy que consulta el estado e índice completo desde ControlFile (Render)
  * 
  * Los índices se almacenan en el backend de Render, no en Vercel.
  * Este endpoint actúa como proxy para consultar el estado desde el backend correcto.
+ * 
+ * @param repositoryId - Formato: github:owner:repo
  */
-export async function GET(request: NextRequest) {
-  console.log("[STATUS] GET /api/repository/status - Endpoint llamado")
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { repositoryId: string } }
+) {
+  console.log(`[STATUS] GET /api/repository/status/${params.repositoryId} - Endpoint llamado`)
   
   try {
-    const searchParams = request.nextUrl.searchParams
-    const owner = searchParams.get("owner")
-    const repo = searchParams.get("repo")
-    const branch = searchParams.get("branch")
+    const repositoryId = params.repositoryId
     
-    console.log(`[STATUS] Parámetros recibidos: owner=${owner}, repo=${repo}, branch=${branch}`)
-
-    // Validar parámetros
-    if (!owner || !repo) {
+    // Validar formato de repositoryId
+    if (!repositoryId || !repositoryId.startsWith("github:")) {
       return NextResponse.json(
-        { error: "owner y repo son requeridos como query parameters" },
+        { error: "repositoryId debe tener formato: github:owner:repo" },
         { status: 400 }
       )
     }
@@ -35,17 +35,9 @@ export async function GET(request: NextRequest) {
         { status: 500 }
       )
     }
-
-    // Construir query string para el backend
-    const queryParams = new URLSearchParams({
-      owner,
-      repo,
-    })
-    if (branch) {
-      queryParams.append("branch", branch)
-    }
-
-    const backendUrl = `${controlFileUrl}/api/repository/status?${queryParams.toString()}`
+    
+    // El backend espera: GET /api/repository/status/:repositoryId
+    const backendUrl = `${controlFileUrl}/api/repository/status/${repositoryId}`
     console.log(`[STATUS] Consultando backend: ${backendUrl}`)
 
     try {
@@ -74,7 +66,7 @@ export async function GET(request: NextRequest) {
       )
     }
   } catch (error) {
-    console.error("Error en GET /api/repository/status:", error)
+    console.error("Error en GET /api/repository/status/:repositoryId:", error)
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Error desconocido",
@@ -83,4 +75,3 @@ export async function GET(request: NextRequest) {
     )
   }
 }
-
