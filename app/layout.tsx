@@ -7,6 +7,7 @@ import { AuthProvider } from "@/lib/auth-context"
 import { RepositoryProvider } from "@/lib/repository-context"
 import { ContextFilesProvider } from "@/lib/context-files-context"
 import { AuthWrapper } from "@/components/auth-wrapper"
+import { Toaster } from "@/components/ui/sonner"
 import "./globals.css"
 
 const _geist = Geist({ subsets: ["latin"] })
@@ -52,6 +53,7 @@ export default function RootLayout({
             </RepositoryProvider>
           </AuthProvider>
         </ThemeProvider>
+        <Toaster />
         <Analytics />
       </body>
     </html>

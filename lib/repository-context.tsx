@@ -7,6 +7,7 @@ import { parseRepositoryId } from "./repository/utils"
 import { searchFiles as searchFilesUtil } from "./repository/search"
 import { useAuth } from "./auth-context"
 import { getAuth } from "firebase/auth"
+import { toast } from "sonner"
 
 type RepositoryStatus = "idle" | "indexing" | "completed" | "error"
 
@@ -187,7 +188,19 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
             // Si el estado del índice cambió a "completed" o "error", detener polling
             if (index.status === "completed") {
+              // Verificar si acabamos de completar (transición de indexing a completed)
+              const wasIndexing = status === "indexing"
+              
               setStatus("completed")
+              
+              // Mostrar notificación si acabamos de completar
+              if (wasIndexing) {
+                toast.success("Indexación completada", {
+                  description: `El repositorio ${index.owner}/${index.repo} ha sido indexado exitosamente. ${index.files?.length || 0} archivos procesados.`,
+                  duration: 5000,
+                })
+              }
+              
               // Actualizar preferencias cuando se completa la indexación
               updateUserPreferences(index.id).catch((err) => {
                 console.error("Error al actualizar preferencias:", err)

@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getRepositoryIndex, isIndexing } from "@/lib/repository/storage"
-import { RepositoryIndex } from "@/lib/types/repository"
-import { createRepositoryId } from "@/lib/repository/utils"
 
 /**
  * GET /api/repository/status
- * Obtiene el estado e índice completo de un repositorio
+ * Proxy que consulta el estado e índice completo desde ControlFile (Render)
+ * 
+ * Los índices se almacenan en el backend de Render, no en Vercel.
+ * Este endpoint actúa como proxy para consultar el estado desde el backend correcto.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -22,65 +22,53 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Usar la rama proporcionada o buscar cualquier índice del repo
-    let index: Awaited<ReturnType<typeof getRepositoryIndex>>
-    let repositoryId: string
+    // Construir URL del backend de Render
+    const controlFileUrl = process.env.CONTROLFILE_URL || process.env.NEXT_PUBLIC_CONTROLFILE_URL
+    if (!controlFileUrl) {
+      console.error("[STATUS] CONTROLFILE_URL no configurada")
+      return NextResponse.json(
+        { error: "Configuración del backend no disponible" },
+        { status: 500 }
+      )
+    }
 
+    // Construir query string para el backend
+    const queryParams = new URLSearchParams({
+      owner,
+      repo,
+    })
     if (branch) {
-      repositoryId = createRepositoryId(owner, repo, branch)
-      index = await getRepositoryIndex(repositoryId)
-    } else {
-      // Si no se proporciona branch, buscar cualquier índice existente del repo
-      // Por ahora, intentar con "main" y "master" como fallback
-      const possibleBranches = ["main", "master"]
-      index = null
-      for (const possibleBranch of possibleBranches) {
-        repositoryId = createRepositoryId(owner, repo, possibleBranch)
-        index = await getRepositoryIndex(repositoryId)
-        if (index) break
-      }
-      if (!index) {
-        repositoryId = createRepositoryId(owner, repo, "main") // Fallback
-      }
+      queryParams.append("branch", branch)
     }
 
-    // Verificar si está siendo indexado
-    const indexing = await isIndexing(repositoryId)
+    const backendUrl = `${controlFileUrl}/api/repository/status?${queryParams.toString()}`
+    console.log(`[STATUS] Consultando backend: ${backendUrl}`)
 
-    // Obtener índice si no lo tenemos
-    if (!index) {
-      index = await getRepositoryIndex(repositoryId)
+    try {
+      const backendResponse = await fetch(backendUrl, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      })
+
+      const responseData = await backendResponse.json()
+      console.log(`[STATUS] Respuesta del backend: ${backendResponse.status}`)
+
+      // Retornar respuesta del backend
+      return NextResponse.json(responseData, {
+        status: backendResponse.status,
+      })
+    } catch (fetchError) {
+      console.error("[STATUS] Error al comunicarse con ControlFile:", fetchError)
+      return NextResponse.json(
+        {
+          error: "Error al comunicarse con el backend de indexación",
+          details: fetchError instanceof Error ? fetchError.message : "Error desconocido",
+        },
+        { status: 502 }
+      )
     }
-
-    // Si no existe índice, devolver estado según si está indexando o no
-    if (!index) {
-      if (indexing) {
-        // Está indexando pero el índice aún no existe
-        return NextResponse.json(
-          {
-            repositoryId,
-            status: "indexing" as const,
-          },
-          { status: 200 }
-        )
-      } else {
-        // No existe índice y tampoco está indexando
-        return NextResponse.json(
-          {
-            repositoryId,
-            status: "not_found" as const,
-          },
-          { status: 200 }
-        )
-      }
-    }
-
-    // Si está siendo indexado, actualizar estado
-    if (indexing && index.status === "completed") {
-      index.status = "indexing"
-    }
-
-    return NextResponse.json<RepositoryIndex>(index, { status: 200 })
   } catch (error) {
     console.error("Error en GET /api/repository/status:", error)
     return NextResponse.json(
