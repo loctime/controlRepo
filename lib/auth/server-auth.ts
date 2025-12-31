@@ -20,7 +20,7 @@ let db: Firestore | undefined
 /**
  * Inicializa Firebase Admin SDK
  */
-function initializeFirebaseAdmin(): { auth: Auth; db: Firestore } {
+export function initializeFirebaseAdmin(): { auth: Auth; db: Firestore } {
   // Log: Verificar si ya está inicializado en memoria
   if (auth && db) {
     console.log("[AUTH] Firebase Admin ya inicializado en memoria, reutilizando instancia")
