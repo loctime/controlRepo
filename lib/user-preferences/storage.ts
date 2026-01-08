@@ -1,7 +1,7 @@
 /**
  * Persistencia de preferencias de usuario usando Firestore
  * Almacena el repositorio activo por usuario
- * Namespace: /apps/controlrepo/users/{userId}/preferences
+ * Namespace: /apps/controlrepo/users/{userId}/preferences/default
  */
 
 import { initializeFirebaseAdmin } from "@/lib/auth/server-auth"
@@ -98,7 +98,7 @@ export async function getUserPreferences(userId: string): Promise<UserPreference
   const { db } = initializeFirebaseAdmin()
 
   try {
-    const docPath = `apps/controlrepo/users/${userId}/preferences`
+    const docPath = `apps/controlrepo/users/${userId}/preferences/default`
     const docRef = db.doc(docPath)
     const doc = await docRef.get()
 
@@ -159,7 +159,7 @@ export async function saveUserPreferences(preferences: UserPreferences): Promise
   }
 
   try {
-    const docPath = `apps/controlrepo/users/${preferences.userId}/preferences`
+    const docPath = `apps/controlrepo/users/${preferences.userId}/preferences/default`
     const docRef = db.doc(docPath)
 
     console.log(`[USER-PREFERENCES] Guardando preferencias en: ${docPath}`)
