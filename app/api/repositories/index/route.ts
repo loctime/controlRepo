@@ -14,6 +14,7 @@ export async function POST(request: NextRequest) {
     method: "POST",
     headers: request.headers,
     body: request.body,
+    duplex: "half",
   })
 
   const data = await response.json()
