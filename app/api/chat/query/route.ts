@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
 
-    const { question, repositoryId, index } = body
+    const { question, repositoryId } = body
 
     /* ---------------------------
      * Validaciones
@@ -53,14 +53,13 @@ export async function POST(req: NextRequest) {
      * PASO 4 – Seleccionar archivos DESDE EL ÍNDICE
      * --------------------------- */
 
-    // Usar el índice pasado desde el frontend (preferido)
-    // Si no se pasa, intentar cargarlo desde filesystem (fallback)
+    // El backend carga el índice por sí mismo usando repositoryId
     const repoFiles = await selectFilesFromIndex(
       repositoryId,
       analysis,
       jsonContext,
       { maxFiles: 5 },
-      index || null
+      null // El backend carga el índice desde el filesystem
     )
 
     /* ---------------------------

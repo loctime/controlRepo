@@ -23,13 +23,22 @@ export function ChatPanel() {
     setMessage(null)
 
     try {
-      const [ownerRepo, branch] = repositoryId.split("#")
-      const [owner, repo] = ownerRepo.split("/")
+      // Parsear repositoryId en formato: github:owner:repo
+      if (!repositoryId.startsWith("github:")) {
+        throw new Error("Formato de repositoryId inválido")
+      }
+
+      const parts = repositoryId.replace("github:", "").split(":")
+      if (parts.length !== 2) {
+        throw new Error("Formato de repositoryId inválido")
+      }
+
+      const [owner, repo] = parts
 
       const res = await fetch("/api/repository/flows/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ owner, repo, branch }),
+        body: JSON.stringify({ owner, repo }),
       })
 
       const data = await res.json()

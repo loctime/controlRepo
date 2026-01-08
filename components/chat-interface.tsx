@@ -11,6 +11,7 @@ import { ContextPanel } from "./context-panel"
 import { useRepository } from "@/lib/repository-context"
 import { useContextFiles } from "@/lib/context-files-context"
 import { Spinner } from "@/components/ui/spinner"
+import type { ChatQueryResponse } from "@/lib/types/api-contract"
 
 interface Message {
   role: "user" | "assistant"
@@ -57,7 +58,7 @@ export function ChatInterface() {
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
 
-  const { repositoryId, preferencesLoaded, currentIndex } = useRepository()
+  const { repositoryId, preferencesLoaded, status } = useRepository()
   const { setContextFiles } = useContextFiles()
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -125,25 +126,12 @@ export function ChatInterface() {
         const lines: string[] = []
 
         lines.push(`Repositorio cargado: ${data.repositoryId}`)
-        if (data.commit) lines.push(`Commit indexado: ${data.commit}`)
-        if (data.totalFiles)
-          lines.push(`Archivos analizados: ${data.totalFiles}`)
-
-        if (data.keyFiles?.readme) {
-          lines.push("README detectado.")
-        }
-
-        if (data.keyFiles?.docs > 0) {
-          lines.push(
-            `Documentación encontrada (${data.keyFiles.docs} archivos).`
-          )
-        }
-
-        if (data.keyFiles?.apiRoutes > 0) {
-          lines.push(
-            `Rutas API detectadas (${data.keyFiles.apiRoutes}).`
-          )
-        }
+        if (data.stats?.totalFiles)
+          lines.push(`Archivos analizados: ${data.stats.totalFiles}`)
+        if (data.stats?.totalSize)
+          lines.push(`Tamaño total: ${(data.stats.totalSize / 1024).toFixed(2)} KB`)
+        if (data.stats?.languages && data.stats.languages.length > 0)
+          lines.push(`Lenguajes: ${data.stats.languages.join(", ")}`)
 
         lines.push("")
         lines.push(
@@ -199,14 +187,22 @@ export function ChatInterface() {
       return
     }
 
-    // Validar que el índice esté disponible
-    if (!currentIndex) {
+    // Validar que el repositorio esté listo según contrato
+    if (status !== "ready") {
+      let message = "El repositorio no está listo."
+      if (status === "indexing") {
+        message = "El repositorio se está indexando. Por favor, esperá a que termine la indexación."
+      } else if (status === "idle") {
+        message = "El repositorio no está indexado. Por favor, indexalo primero."
+      } else if (status === "error") {
+        message = "Hay un error con el repositorio. Por favor, intentá nuevamente."
+      }
+      
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content:
-            "Repositorio cargándose. Por favor, esperá a que termine de cargar el índice.",
+          content: message,
         },
       ])
       return
@@ -224,8 +220,6 @@ export function ChatInterface() {
 
     const controller = new AbortController()
     abortControllerRef.current = controller
-    console.log("repositoryId:", repositoryId)
-    console.log("currentIndex disponible:", !!currentIndex)
 
     try {
       const res = await fetch("/api/chat/query", {
@@ -233,26 +227,57 @@ export function ChatInterface() {
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
         body: JSON.stringify({
-          question,
           repositoryId,
-          index: currentIndex, // Enviar el índice completo desde el contexto
+          question,
         }),
       })
 
       if (controller.signal.aborted) return
 
-      const data = await res.json()
+      const data = (await res.json()) as ChatQueryResponse
 
-      if (!res.ok || !data.success) {
+      // Según contrato: 200 = success, 202 = indexing, 400 = not ready
+      if (res.status === 202) {
+        // Repositorio indexando
+        const indexingData = data as Extract<ChatQueryResponse, { status: "indexing" }>
+        setMessages((prev) => {
+          const updated = [...prev]
+          updated[updated.length - 1] = {
+            role: "assistant",
+            content: indexingData.message,
+          }
+          return updated
+        })
         setContextFiles([])
-        throw new Error(data.error || "Error al consultar el repositorio")
+        return
       }
 
-      const contextFiles =
-        data.sources?.files?.map((path: string) => ({
-          name: path.split("/").pop(),
-          path,
-        })) ?? []
+      if (res.status === 400) {
+        // Repositorio no listo
+        const notReadyData = data as Extract<ChatQueryResponse, { status: "idle" | "error" }>
+        setMessages((prev) => {
+          const updated = [...prev]
+          updated[updated.length - 1] = {
+            role: "assistant",
+            content: notReadyData.message,
+          }
+          return updated
+        })
+        setContextFiles([])
+        return
+      }
+
+      if (!res.ok) {
+        throw new Error("Error al consultar el repositorio")
+      }
+
+      // Response 200: success
+      const successData = data as Extract<ChatQueryResponse, { response: string }>
+      
+      const contextFiles = successData.sources?.map((source) => ({
+        name: source.path.split("/").pop() || source.path,
+        path: source.path,
+      })) ?? []
 
       setContextFiles(contextFiles)
 
@@ -260,7 +285,7 @@ export function ChatInterface() {
         const updated = [...prev]
         updated[updated.length - 1] = {
           role: "assistant",
-          content: data.answer,
+          content: successData.response,
         }
         return updated
       })

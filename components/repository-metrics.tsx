@@ -1,15 +1,66 @@
 "use client"
 
+import { useState, useEffect } from "react"
 import { useRepository } from "@/lib/repository-context"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from "@/components/ui/chart"
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, ResponsiveContainer } from "recharts"
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis } from "recharts"
 import { FileText, Code, Languages, Network, DoorOpen } from "lucide-react"
+import { RepositoryMetrics as RepositoryMetricsType } from "@/lib/types/repository-metrics"
 
 export function RepositoryMetrics() {
-  const { currentMetrics, currentIndex } = useRepository()
+  const { repositoryId, status } = useRepository()
+  const [metrics, setMetrics] = useState<RepositoryMetricsType | null>(null)
+  const [loading, setLoading] = useState(false)
 
-  if (!currentMetrics || !currentIndex) {
+  useEffect(() => {
+    if (!repositoryId || status !== "completed") {
+      setMetrics(null)
+      return
+    }
+
+    const loadMetrics = async () => {
+      setLoading(true)
+      try {
+        // Parsear repositoryId para obtener owner y repo
+        const parts = repositoryId.replace("github:", "").split(":")
+        if (parts.length !== 2) {
+          setMetrics(null)
+          return
+        }
+
+        const [owner, repo] = parts
+        const response = await fetch(
+          `/api/repository/metrics?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`
+        )
+
+        if (!response.ok) {
+          setMetrics(null)
+          return
+        }
+
+        const data = await response.json()
+        setMetrics(data as RepositoryMetricsType)
+      } catch (error) {
+        console.error("Error al cargar métricas:", error)
+        setMetrics(null)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadMetrics()
+  }, [repositoryId, status])
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-8 text-muted-foreground">
+        Cargando métricas...
+      </div>
+    )
+  }
+
+  if (!metrics) {
     return (
       <div className="flex items-center justify-center p-8 text-muted-foreground">
         No hay métricas disponibles para este repositorio
@@ -18,14 +69,14 @@ export function RepositoryMetrics() {
   }
 
   // Preparar datos para gráfico de lenguajes (donut)
-  const languageData = currentMetrics.languages.slice(0, 8).map((lang) => ({
+  const languageData = metrics.languages.slice(0, 8).map((lang) => ({
     name: lang.ext || "Sin extensión",
     value: lang.lines,
     files: lang.files,
   }))
 
   // Preparar datos para gráfico de carpetas (barras)
-  const folderData = currentMetrics.structure.folders.slice(0, 10).map((folder) => ({
+  const folderData = metrics.structure.folders.slice(0, 10).map((folder) => ({
     name: folder.path || "/",
     value: folder.lines,
     files: folder.files,
@@ -55,10 +106,10 @@ export function RepositoryMetrics() {
   }
 
   // Top lenguajes principales
-  const topLanguages = currentMetrics.languages.slice(0, 3)
+  const topLanguages = metrics.languages.slice(0, 3)
 
   // Top archivos más importados
-  const topImported = currentMetrics.relations.mostImported.slice(0, 5)
+  const topImported = metrics.relations.mostImported.slice(0, 5)
 
   return (
     <div className="space-y-4">
@@ -70,9 +121,9 @@ export function RepositoryMetrics() {
             <FileText className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{currentMetrics.structure.totalFiles.toLocaleString()}</div>
+            <div className="text-2xl font-bold">{metrics.structure.totalFiles.toLocaleString()}</div>
             <CardDescription className="text-xs mt-1">
-              {currentMetrics.structure.folders.length} carpetas
+              {metrics.structure.folders.length} carpetas
             </CardDescription>
           </CardContent>
         </Card>
@@ -83,9 +134,9 @@ export function RepositoryMetrics() {
             <Code className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{currentMetrics.structure.totalLines.toLocaleString()}</div>
+            <div className="text-2xl font-bold">{metrics.structure.totalLines.toLocaleString()}</div>
             <CardDescription className="text-xs mt-1">
-              Promedio: {Math.round(currentMetrics.structure.totalLines / currentMetrics.structure.totalFiles)} líneas/archivo
+              Promedio: {Math.round(metrics.structure.totalLines / metrics.structure.totalFiles)} líneas/archivo
             </CardDescription>
           </CardContent>
         </Card>
@@ -109,7 +160,7 @@ export function RepositoryMetrics() {
             <DoorOpen className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{currentMetrics.entrypoints.length}</div>
+            <div className="text-2xl font-bold">{metrics.entrypoints.length}</div>
             <CardDescription className="text-xs mt-1">
               Puntos de entrada detectados
             </CardDescription>
@@ -219,7 +270,7 @@ export function RepositoryMetrics() {
       )}
 
       {/* Entrypoints */}
-      {currentMetrics.entrypoints.length > 0 && (
+      {metrics.entrypoints.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>Entrypoints</CardTitle>
@@ -227,7 +278,7 @@ export function RepositoryMetrics() {
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {currentMetrics.entrypoints.map((entrypoint, index) => (
+              {metrics.entrypoints.map((entrypoint, index) => (
                 <div key={entrypoint.path} className="flex items-center justify-between p-2 rounded-md bg-muted/50">
                   <div className="flex items-center gap-2">
                     <DoorOpen className="h-4 w-4 text-muted-foreground" />

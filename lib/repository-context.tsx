@@ -1,107 +1,78 @@
 "use client"
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from "react"
-import { RepositoryIndex, IndexedFile, FileCategory, FileType } from "./types/repository"
-import { RepositoryMetrics } from "./types/repository-metrics"
-import { searchFiles as searchFilesUtil } from "./repository/search"
 import { useAuth } from "./auth-context"
 import { getAuth } from "firebase/auth"
 import { toast } from "sonner"
+import type {
+  IndexRepositoryRequest,
+  IndexRepositoryResponse,
+  RepositoryStatusResponse,
+} from "./types/api-contract"
 
-type RepositoryStatus = "idle" | "indexing" | "completed" | "error"
+// Re-exportar para uso en componentes
+export type { RepositoryStatusResponse }
 
+/**
+ * Contexto de repositorio - Arquitectura pasiva
+ * El frontend confía plenamente en el backend como única fuente de verdad
+ */
 interface RepositoryContextType {
-  // Estado
-  currentIndex: RepositoryIndex | null
-  currentMetrics: RepositoryMetrics | null
-  status: RepositoryStatus
+  // Estado (solo lo que viene del backend)
+  repositoryId: string | null
+  status: RepositoryStatusResponse["status"]
   loading: boolean
   error: string | null
-  repositoryId: string | null
   preferencesLoaded: boolean
+  
+  // Metadata del status (solo para display)
+  statusData: {
+    indexedAt?: string
+    stats?: RepositoryStatusResponse["stats"]
+  } | null
 
   // Acciones
-  indexRepository: (owner: string, repo: string, branch?: string) => Promise<void>
-  reindexRepository: (owner: string, repo: string, branch?: string) => Promise<void>
-  refreshStatus: (owner: string, repo: string, branch?: string) => Promise<void>
-
-  // Helpers de solo lectura (trabajan con currentIndex)
-  getFilesByCategory: (category: FileCategory) => IndexedFile[]
-  getFilesByType: (type: FileType) => IndexedFile[]
-  getFileByPath: (path: string) => IndexedFile | null
-  getRelatedFiles: (path: string) => IndexedFile[]
-  searchFiles: (query: string) => IndexedFile[]
+  indexRepository: (repositoryId: string, force?: boolean) => Promise<void>
+  refreshStatus: (repositoryId: string) => Promise<void>
 }
 
 const RepositoryContext = createContext<RepositoryContextType | undefined>(undefined)
 
-const POLLING_INTERVAL = 4000 // 4 segundos (entre 3-5 segundos)
+const POLLING_INTERVAL = 4000 // 4 segundos
 
 /**
- * Construye repositoryId en formato: github:owner:repo
- * Valida que owner y repo sean válidos antes de construir
+ * Parsea repositoryId en formato: github:owner:repo
  */
-function buildRepositoryId(owner: string, repo: string): string | null {
-  if (!owner || !repo || typeof owner !== "string" || typeof repo !== "string") {
-    return null
-  }
-  const trimmedOwner = owner.trim()
-  const trimmedRepo = repo.trim()
-  if (!trimmedOwner || !trimmedRepo) {
-    return null
-  }
-  return `github:${trimmedOwner}:${trimmedRepo}`
-}
-
-/**
- * Parsea repositoryId en formato: github:owner:repo o owner/repo (legacy)
- * Retorna null si el formato no es válido (sin lanzar errores)
- */
-function parseRepositoryIdFromPrefs(repositoryId: string): { owner: string; repo: string } | null {
+function parseRepositoryId(repositoryId: string): { owner: string; repo: string } | null {
   if (!repositoryId || typeof repositoryId !== "string") {
     return null
   }
   
   const trimmed = repositoryId.trim()
-  if (!trimmed) {
+  if (!trimmed || !trimmed.startsWith("github:")) {
     return null
   }
   
-  // Formato: github:owner:repo
-  if (trimmed.startsWith("github:")) {
-    const parts = trimmed.replace("github:", "").split(":")
-    if (parts.length === 2) {
-      const owner = parts[0].trim()
-      const repo = parts[1].trim()
-      // Validar que owner y repo no estén vacíos
-      if (owner && repo) {
-        return { owner, repo }
-      }
-    }
+  const parts = trimmed.replace("github:", "").split(":")
+  if (parts.length !== 2) {
     return null
   }
   
-  // Formato legacy: owner/repo
-  const parts = trimmed.split("/")
-  if (parts.length === 2) {
-    const owner = parts[0].trim()
-    const repo = parts[1].trim()
-    // Validar que owner y repo no estén vacíos
-    if (owner && repo) {
-      return { owner, repo }
-    }
+  const owner = parts[0].trim()
+  const repo = parts[1].trim()
+  if (!owner || !repo) {
+    return null
   }
   
-  return null
+  return { owner, repo }
 }
 
 export function RepositoryProvider({ children }: { children: React.ReactNode }) {
-  const [currentIndex, setCurrentIndex] = useState<RepositoryIndex | null>(null)
-  const [currentMetrics, setCurrentMetrics] = useState<RepositoryMetrics | null>(null)
-  const [status, setStatus] = useState<RepositoryStatus>("idle")
+  const [repositoryId, setRepositoryId] = useState<string | null>(null)
+  const [status, setStatus] = useState<RepositoryStatusResponse["status"]>("idle")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [repositoryId, setRepositoryId] = useState<string | null>(null)
+  const [statusData, setStatusData] = useState<RepositoryContextType["statusData"]>(null)
   const { user } = useAuth()
   const [preferencesLoaded, setPreferencesLoaded] = useState(false)
 
@@ -124,69 +95,16 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
   }, [])
 
   /**
-   * Carga las métricas del repositorio desde el API
-   * TEMPORALMENTE DESACTIVADO: El backend no expone el endpoint /api/repository/metrics (Fase 1)
-   */
-  const loadMetrics = useCallback(
-    async (owner: string, repo: string, branch: string = "main") => {
-      // Guard clause: desactivar temporalmente las llamadas a /api/repository/metrics
-      // El sistema funcionará solo con /api/repository/status
-      setCurrentMetrics(null)
-      return
-
-      /* CÓDIGO DESACTIVADO TEMPORALMENTE - Fase 1
-      try {
-        const response = await fetch(
-          `/api/repository/metrics?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&branch=${encodeURIComponent(branch)}`
-        )
-
-        if (!response.ok) {
-          // Si no hay métricas (404), establecer a null y continuar sin error
-          if (response.status === 404) {
-            setCurrentMetrics(null)
-            return
-          }
-          throw new Error(`Error al obtener métricas: ${response.statusText}`)
-        }
-
-        const metrics = await response.json()
-        setCurrentMetrics(metrics as RepositoryMetrics)
-      } catch (err) {
-        console.error("Error al cargar métricas:", err)
-        // No establecer error global, solo loguear
-        // Las métricas son opcionales y no deberían bloquear el flujo
-        setCurrentMetrics(null)
-      }
-      */
-    },
-    []
-  )
-
-  /**
    * Actualiza las preferencias del usuario con el repositorio activo
-   * Solo acepta repositoryId válidos: github:owner:repo o null
    */
   const updateUserPreferences = useCallback(
     async (activeRepositoryId: string | null) => {
       if (!user?.uid) return
 
-      // Validar que activeRepositoryId sea válido si no es null
-      if (activeRepositoryId !== null) {
-        const parsed = parseRepositoryIdFromPrefs(activeRepositoryId)
-        if (!parsed) {
-          console.warn(
-            `[updateUserPreferences] Rechazado repositoryId inválido: "${activeRepositoryId}". No se actualizarán las preferencias.`
-          )
-          return
-        }
-      }
-
       try {
-        // Obtener token de autenticación
         const auth = getAuth()
         const currentUser = auth.currentUser
         if (!currentUser) {
-          console.error("No hay usuario autenticado para actualizar preferencias")
           return
         }
 
@@ -204,7 +122,6 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         })
       } catch (err) {
         console.error("Error al actualizar preferencias de usuario:", err)
-        // No bloquear el flujo si falla la actualización de preferencias
       }
     },
     [user?.uid]
@@ -227,129 +144,66 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
   }, [])
 
   /**
-   * Inicia polling automático para verificar el estado de indexación
+   * Inicia polling automático para verificar el estado
+   * Solo consulta el backend, no infiere estados
    */
   const startPolling = useCallback(
-    (owner: string, repo: string) => {
-      // Validar owner y repo antes de continuar
-      if (!owner || !repo || typeof owner !== "string" || typeof repo !== "string") {
-        console.warn(`[startPolling] owner o repo inválidos: owner="${owner}", repo="${repo}"`)
+    (repoId: string) => {
+      if (!repoId || typeof repoId !== "string" || !repoId.startsWith("github:")) {
+        console.warn(`[startPolling] repositoryId inválido: "${repoId}"`)
         return
       }
 
-      // Detener polling anterior si existe
       stopPolling()
-
-      const repositoryId = buildRepositoryId(owner, repo)
-      if (!repositoryId) {
-        console.warn(`[startPolling] No se pudo construir repositoryId válido para owner="${owner}", repo="${repo}"`)
-        return
-      }
-      pollingRef.current.repositoryId = repositoryId
+      pollingRef.current.repositoryId = repoId
 
       const poll = async () => {
         try {
-          // Guard clause adicional: no hacer fetch si repositoryId es inválido
-          if (!repositoryId || repositoryId === "undefined" || repositoryId.includes("undefined") || repositoryId.includes("null")) {
-            console.warn(`[startPolling] repositoryId inválido en poll: "${repositoryId}"`)
-            stopPolling()
-            return
-          }
+          const response = await fetch(`/api/repositories/${encodeURIComponent(repoId)}/status`)
 
-          const response = await fetch(
-            `/api/repository/status?repositoryId=${encodeURIComponent(repositoryId)}`
-          )
-
-          // Manejar 400/404 como estado final: asumir que no existe índice
-          if (response.status === 400 || response.status === 404) {
-            setCurrentIndex(null)
-            setCurrentMetrics(null)
-            setStatus("idle")
-            stopPolling()
-            return
-          }
-
+          // Según el contrato: siempre devuelve 200
           if (!response.ok) {
-            throw new Error(`Error al obtener estado: ${response.statusText}`)
-          }
-
-          const data = await response.json()
-
-          // El endpoint /status solo devuelve metadata (status, repositoryId, stats, owner, repo, indexedAt)
-          // NO devuelve files - currentIndex solo se setea cuando hay un índice completo real
-          const statusResponse = data as { 
-            repositoryId: string
-            status: string
-            owner?: string
-            repo?: string
-            stats?: { totalFiles?: number }
-            indexedAt?: string
-            index?: RepositoryIndex
-          }
-          
-          // Normalizar repositoryId al formato github:owner:repo
-          let normalizedRepoId: string | null = null
-          if (statusResponse.repositoryId.startsWith("github:")) {
-            normalizedRepoId = statusResponse.repositoryId
-          } else {
-            normalizedRepoId = buildRepositoryId(owner, repo)
-          }
-
-          // Validar que normalizedRepoId sea válido
-          if (!normalizedRepoId) {
-            console.warn(`[startPolling] No se pudo normalizar repositoryId. statusResponse.repositoryId="${statusResponse.repositoryId}", owner="${owner}", repo="${repo}"`)
-            stopPolling()
+            console.error(`[startPolling] Error al obtener estado: ${response.statusText}`)
             return
           }
 
-          setRepositoryId(normalizedRepoId)
+          const data = (await response.json()) as RepositoryStatusResponse
 
-          if (statusResponse.status === "completed") {
-            // Verificar si acabamos de completar (transición de indexing a completed)
-            const wasIndexing = status === "indexing"
-            
-            setStatus("completed")
-            
-            // Cargar el índice completo si está disponible en la respuesta
-            if (statusResponse.index && statusResponse.index.status === "completed") {
-              setCurrentIndex(statusResponse.index)
-            }
-            
-            // Mostrar notificación cuando se completa la indexación
-            if (wasIndexing) {
-              const fileCount = statusResponse.stats?.totalFiles || 0
-              toast.success("Repositorio indexado correctamente", {
-                description: `El repositorio ${statusResponse.owner || owner}/${statusResponse.repo || repo} ha sido indexado exitosamente. ${fileCount} archivos procesados.`,
-                duration: 5000,
-              })
-            }
-            
-            // Actualizar preferencias cuando se completa la indexación
-            updateUserPreferences(normalizedRepoId).catch((err) => {
-              console.error("Error al actualizar preferencias:", err)
-            })
-            // Cargar métricas cuando el índice está completado (usar owner/repo que ya tenemos)
-            loadMetrics(owner, repo).catch((err) => {
-              console.error("Error al cargar métricas:", err)
-            })
-            // Detener polling cuando se completa
-            stopPolling()
-          } else if (statusResponse.status === "error") {
-            setStatus("error")
-            setError("Error durante la indexación")
-            stopPolling()
-          } else if (statusResponse.status === "indexing") {
-            // Está indexando
-            setCurrentIndex(null)
-            setCurrentMetrics(null)
-            setStatus("indexing")
-          } else if (statusResponse.status === "not_found") {
-            // No existe índice y tampoco está indexando
-            setCurrentIndex(null)
-            setCurrentMetrics(null)
-            setStatus("idle")
-            stopPolling()
+          // Actualizar estado exactamente como viene del backend
+          setRepositoryId(data.repositoryId)
+          setStatus(data.status)
+          setStatusData({
+            indexedAt: data.indexedAt,
+            stats: data.stats,
+          })
+
+          // Si hay error, mostrarlo
+          if (data.error) {
+            setError(data.error)
+          } else {
+            setError(null)
           }
+
+          // Detener polling cuando está ready o error
+          if (data.status === "ready" || data.status === "error") {
+            stopPolling()
+            
+            if (data.status === "ready") {
+              // Verificar si acabamos de completar (transición de indexing a ready)
+              const wasIndexing = status === "indexing"
+              if (wasIndexing) {
+                const fileCount = data.stats?.totalFiles || 0
+                toast.success("Repositorio indexado correctamente", {
+                  description: `El repositorio ha sido indexado exitosamente. ${fileCount} archivos procesados.`,
+                  duration: 5000,
+                })
+              }
+              
+              // Actualizar preferencias cuando se completa
+              await updateUserPreferences(data.repositoryId)
+            }
+          }
+          // Si está indexing o idle, continuar polling
         } catch (err) {
           console.error("Error en polling:", err)
           // No detener polling por errores de red temporales
@@ -363,18 +217,18 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
       pollingRef.current.intervalId = setInterval(() => {
         poll()
       }, POLLING_INTERVAL)
-      },
-      [stopPolling, updateUserPreferences, loadMetrics, status]
-    )
+    },
+    [stopPolling, updateUserPreferences, status]
+  )
 
   /**
-   * Indexa un repositorio completo
+   * Indexa un repositorio
+   * POST /repositories/index según contrato
    */
   const indexRepository = useCallback(
-    async (owner: string, repo: string, branch: string = "main") => {
-      // Validar owner y repo antes de continuar
-      if (!owner || !repo || typeof owner !== "string" || typeof repo !== "string") {
-        const errorMessage = `owner o repo inválidos: owner="${owner}", repo="${repo}"`
+    async (repoId: string, force: boolean = false) => {
+      if (!repoId || typeof repoId !== "string" || !repoId.startsWith("github:")) {
+        const errorMessage = `repositoryId inválido: "${repoId}"`
         console.warn(`[indexRepository] ${errorMessage}`)
         setError(errorMessage)
         setStatus("error")
@@ -383,22 +237,11 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
       setLoading(true)
       setError(null)
-      setStatus("indexing")
-      const repositoryId = buildRepositoryId(owner, repo)
-      if (!repositoryId) {
-        const errorMessage = `No se pudo construir repositoryId válido para owner="${owner}", repo="${repo}"`
-        console.warn(`[indexRepository] ${errorMessage}`)
-        setError(errorMessage)
-        setStatus("error")
-        setLoading(false)
-        return
-      }
-      setRepositoryId(repositoryId)
-      setCurrentIndex(null)
-      setCurrentMetrics(null)
+      setRepositoryId(repoId)
+      setStatus("idle")
+      setStatusData(null)
 
       try {
-        // Obtener el usuario actual y su token de autenticación
         const auth = getAuth()
         const currentUser = auth.currentUser
 
@@ -408,13 +251,20 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
         const token = await currentUser.getIdToken()
 
-        const response = await fetch("/api/repository/index", {
+        // Obtener accessToken de GitHub si está disponible
+        // Por ahora, el backend lo obtiene automáticamente desde Firestore
+        const requestBody: IndexRepositoryRequest = {
+          repositoryId: repoId,
+          force,
+        }
+
+        const response = await fetch("/api/repositories/index", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${token}`,
           },
-          body: JSON.stringify({ owner, repo, branch }),
+          body: JSON.stringify(requestBody),
         })
 
         if (!response.ok) {
@@ -422,20 +272,26 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
           throw new Error(errorData.error || `Error al indexar: ${response.statusText}`)
         }
 
-        const data = await response.json()
+        const data = (await response.json()) as IndexRepositoryResponse
 
-        // Actualizar preferencias del usuario
-        await updateUserPreferences(repositoryId)
+        // Actualizar estado según respuesta del backend
+        setRepositoryId(data.repositoryId)
+        setStatus(data.status)
 
-        // Iniciar polling automático (sin branch)
-        startPolling(owner, repo)
+        // Si está indexing, iniciar polling
+        if (data.status === "indexing") {
+          startPolling(data.repositoryId)
+        } else if (data.status === "ready") {
+          // Si ya está ready, refrescar status para obtener stats
+          await refreshStatus(data.repositoryId)
+          await updateUserPreferences(data.repositoryId)
+        }
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Error desconocido al indexar"
         setError(errorMessage)
         setStatus("error")
         setRepositoryId(null)
-        setCurrentIndex(null)
-        setCurrentMetrics(null)
+        setStatusData(null)
         stopPolling()
       } finally {
         setLoading(false)
@@ -445,79 +301,13 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
   )
 
   /**
-   * Re-indexa un repositorio existente
-   */
-  const reindexRepository = useCallback(
-    async (owner: string, repo: string, branch: string = "main") => {
-      // Validar owner y repo antes de continuar
-      if (!owner || !repo || typeof owner !== "string" || typeof repo !== "string") {
-        const errorMessage = `owner o repo inválidos: owner="${owner}", repo="${repo}"`
-        console.warn(`[reindexRepository] ${errorMessage}`)
-        setError(errorMessage)
-        setStatus("error")
-        return
-      }
-
-      setLoading(true)
-      setError(null)
-      setStatus("indexing")
-      const repositoryId = buildRepositoryId(owner, repo)
-      if (!repositoryId) {
-        const errorMessage = `No se pudo construir repositoryId válido para owner="${owner}", repo="${repo}"`
-        console.warn(`[reindexRepository] ${errorMessage}`)
-        setError(errorMessage)
-        setStatus("error")
-        setLoading(false)
-        return
-      }
-      setRepositoryId(repositoryId)
-      setCurrentIndex(null)
-      setCurrentMetrics(null)
-
-      try {
-        const response = await fetch("/api/repository/reindex", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ owner, repo, branch }),
-        })
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}))
-          throw new Error(errorData.error || `Error al re-indexar: ${response.statusText}`)
-        }
-
-        const data = await response.json()
-
-        // Actualizar preferencias del usuario
-        await updateUserPreferences(repositoryId)
-
-        // Iniciar polling automático (sin branch)
-        startPolling(owner, repo)
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "Error desconocido al re-indexar"
-        setError(errorMessage)
-        setStatus("error")
-        setRepositoryId(null)
-        setCurrentIndex(null)
-        setCurrentMetrics(null)
-        stopPolling()
-      } finally {
-        setLoading(false)
-      }
-    },
-    [startPolling, stopPolling, updateUserPreferences]
-  )
-
-  /**
-   * Refresca el estado del índice sin iniciar indexación
+   * Refresca el estado del repositorio
+   * GET /repositories/{repositoryId}/status según contrato
    */
   const refreshStatus = useCallback(
-    async (owner: string, repo: string, branch: string = "main") => {
-      // Validar owner y repo antes de continuar
-      if (!owner || !repo || typeof owner !== "string" || typeof repo !== "string") {
-        console.warn(`[refreshStatus] owner o repo inválidos: owner="${owner}", repo="${repo}"`)
+    async (repoId: string) => {
+      if (!repoId || typeof repoId !== "string" || !repoId.startsWith("github:")) {
+        console.warn(`[refreshStatus] repositoryId inválido: "${repoId}"`)
         setLoading(false)
         return
       }
@@ -526,112 +316,50 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
       setError(null)
 
       try {
-        const repositoryId = buildRepositoryId(owner, repo)
-        if (!repositoryId) {
-          console.warn(`[refreshStatus] No se pudo construir repositoryId válido para owner="${owner}", repo="${repo}"`)
-          setLoading(false)
-          return
-        }
-
-        // Guard clause adicional: no hacer fetch si repositoryId es inválido
-        if (repositoryId === "undefined" || repositoryId.includes("undefined") || repositoryId.includes("null")) {
-          console.warn(`[refreshStatus] repositoryId inválido: "${repositoryId}"`)
-          setLoading(false)
-          return
-        }
-
-        const response = await fetch(
-          `/api/repository/status?repositoryId=${encodeURIComponent(repositoryId)}`
-        )
-
-        // Manejar 400/404 como estado final: no existe índice
-        if (response.status === 400 || response.status === 404) {
-          setCurrentIndex(null)
-          setCurrentMetrics(null)
-          setStatus("idle")
-          // Limpiar preferencias si el repositorio no existe
-          await updateUserPreferences(null)
-          return
-        }
+        // Según el contrato: siempre devuelve 200
+        const response = await fetch(`/api/repositories/${encodeURIComponent(repoId)}/status`)
 
         if (!response.ok) {
           throw new Error(`Error al obtener estado: ${response.statusText}`)
         }
 
-        const data = await response.json()
+        const data = (await response.json()) as RepositoryStatusResponse
 
-        // El endpoint /status puede devolver el índice completo cuando está disponible
-        const statusResponse = data as { 
-          repositoryId: string
-          status: string
-          owner?: string
-          repo?: string
-          stats?: { totalFiles?: number }
-          indexedAt?: string
-          index?: RepositoryIndex
-        }
-        
-        // Normalizar repositoryId al formato github:owner:repo
-        let normalizedRepoId: string | null = null
-        if (statusResponse.repositoryId.startsWith("github:")) {
-          normalizedRepoId = statusResponse.repositoryId
+        // Actualizar estado exactamente como viene del backend
+        setRepositoryId(data.repositoryId)
+        setStatus(data.status)
+        setStatusData({
+          indexedAt: data.indexedAt,
+          stats: data.stats,
+        })
+
+        if (data.error) {
+          setError(data.error)
         } else {
-          normalizedRepoId = buildRepositoryId(owner, repo)
+          setError(null)
         }
 
-        // Validar que normalizedRepoId sea válido
-        if (!normalizedRepoId) {
-          console.warn(`[refreshStatus] No se pudo normalizar repositoryId. statusResponse.repositoryId="${statusResponse.repositoryId}", owner="${owner}", repo="${repo}"`)
-          setLoading(false)
-          return
-        }
-
-        setRepositoryId(normalizedRepoId)
-
-        if (statusResponse.status === "indexing") {
-          // Está indexando
-          setCurrentIndex(null)
-          setCurrentMetrics(null)
-          setStatus("indexing")
-          // Actualizar preferencias aunque esté indexando
-          await updateUserPreferences(normalizedRepoId)
-          // Iniciar polling (solo si no hay uno activo)
+        // Si está indexing, iniciar polling (solo si no hay uno activo)
+        if (data.status === "indexing") {
           if (!pollingRef.current.intervalId) {
-            startPolling(owner, repo)
+            startPolling(data.repositoryId)
           }
-        } else if (statusResponse.status === "completed") {
-          setStatus("completed")
-          // Cargar el índice completo si está disponible en la respuesta
-          if (statusResponse.index && statusResponse.index.status === "completed") {
-            setCurrentIndex(statusResponse.index)
-          }
-          // Actualizar preferencias cuando se restaura un repositorio completado
-          // Usar normalizedRepoId que ya está normalizado al formato correcto
-          await updateUserPreferences(normalizedRepoId)
-          // Cargar métricas cuando el índice está completado (usar owner/repo que ya tenemos)
-          await loadMetrics(owner, repo, branch)
-        } else if (statusResponse.status === "not_found") {
-          // No existe índice y tampoco está indexando
-          setCurrentIndex(null)
-          setCurrentMetrics(null)
-          setStatus("idle")
-          // Limpiar preferencias si el repositorio no existe
+        } else if (data.status === "ready") {
+          await updateUserPreferences(data.repositoryId)
+        } else if (data.status === "idle") {
           await updateUserPreferences(null)
-        } else {
-          setStatus("error")
-          setError("Error en el índice")
         }
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Error desconocido al refrescar"
         setError(errorMessage)
         setStatus("error")
-        setCurrentIndex(null)
-        setCurrentMetrics(null)
+        setRepositoryId(null)
+        setStatusData(null)
       } finally {
         setLoading(false)
       }
     },
-    [startPolling, updateUserPreferences, loadMetrics]
+    [startPolling, updateUserPreferences]
   )
 
   /**
@@ -642,11 +370,9 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
     const restoreActiveRepository = async () => {
       try {
-        // Obtener token de autenticación
         const auth = getAuth()
         const currentUser = auth.currentUser
         if (!currentUser) {
-          console.error("No hay usuario autenticado para restaurar preferencias")
           setPreferencesLoaded(true)
           return
         }
@@ -658,25 +384,18 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
             "Authorization": `Bearer ${token}`,
           },
         })
+        
         if (!response.ok) {
-          console.error("Error al obtener preferencias de usuario")
           setPreferencesLoaded(true)
           return
         }
 
         const preferences = await response.json()
         if (preferences.activeRepositoryId) {
-          // Parsear repositoryId (formato: "github:owner:repo" o "owner/repo" para compatibilidad)
-          const parsed = parseRepositoryIdFromPrefs(preferences.activeRepositoryId)
-          if (parsed) {
-            // Restaurar el repositorio usando refreshStatus
-            // Esto cargará el índice completo si existe
-            await refreshStatus(parsed.owner, parsed.repo)
-          } else {
-            // Formato inválido: loguear warning y salir silenciosamente
-            console.warn(
-              `[restoreActiveRepository] Formato inválido de activeRepositoryId: "${preferences.activeRepositoryId}". Se omite la restauración.`
-            )
+          const repoId = preferences.activeRepositoryId
+          // Validar formato
+          if (repoId && typeof repoId === "string" && repoId.startsWith("github:")) {
+            await refreshStatus(repoId)
           }
         }
       } catch (err) {
@@ -689,98 +408,15 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
     restoreActiveRepository()
   }, [user?.uid, preferencesLoaded, refreshStatus])
 
-  // Helpers de solo lectura (trabajan exclusivamente con currentIndex)
-
-  /**
-   * Obtiene archivos filtrados por categoría
-   */
-  const getFilesByCategory = useCallback(
-    (category: FileCategory): IndexedFile[] => {
-      if (!currentIndex || !currentIndex.files) return []
-      return currentIndex.files.filter((file) => file.category === category)
-    },
-    [currentIndex]
-  )
-
-  /**
-   * Obtiene archivos filtrados por tipo
-   */
-  const getFilesByType = useCallback(
-    (type: FileType): IndexedFile[] => {
-      if (!currentIndex || !currentIndex.files) return []
-      return currentIndex.files.filter((file) => file.type === type)
-    },
-    [currentIndex]
-  )
-
-  /**
-   * Obtiene un archivo por su path
-   */
-  const getFileByPath = useCallback(
-    (path: string): IndexedFile | null => {
-      if (!currentIndex || !currentIndex.files) return null
-      return currentIndex.files.find((file) => file.path === path) || null
-    },
-    [currentIndex]
-  )
-
-  /**
-   * Obtiene archivos relacionados a un archivo específico
-   */
-  const getRelatedFiles = useCallback(
-    (path: string): IndexedFile[] => {
-      if (!currentIndex || !currentIndex.files) return []
-
-      const file = currentIndex.files.find((f) => f.path === path)
-      if (!file) return []
-
-      const relatedPaths = new Set<string>()
-      
-      // Agregar imports
-      file.relations.imports.forEach((p) => relatedPaths.add(p))
-      
-      // Agregar archivos que importan este archivo
-      file.relations.importedBy.forEach((p) => relatedPaths.add(p))
-      
-      // Agregar dependencias
-      file.relations.dependsOn.forEach((p) => relatedPaths.add(p))
-      
-      // Agregar archivos relacionados
-      file.relations.related.forEach((p) => relatedPaths.add(p))
-
-      // Convertir paths a archivos
-      return currentIndex.files.filter((f) => relatedPaths.has(f.path))
-    },
-    [currentIndex]
-  )
-
-  /**
-   * Busca archivos por query (busca en nombre, path, tags y descripción)
-   */
-  const searchFilesCallback = useCallback(
-    (query: string): IndexedFile[] => {
-      if (!currentIndex || !currentIndex.files || !query.trim()) return []
-      return searchFilesUtil(currentIndex.files, query)
-    },
-    [currentIndex]
-  )
-
   const value: RepositoryContextType = {
-    currentIndex,
-    currentMetrics,
+    repositoryId,
     status,
     loading,
     error,
-    repositoryId,
     preferencesLoaded,
+    statusData,
     indexRepository,
-    reindexRepository,
     refreshStatus,
-    getFilesByCategory,
-    getFilesByType,
-    getFileByPath,
-    getRelatedFiles,
-    searchFiles: searchFilesCallback,
   }
 
   return <RepositoryContext.Provider value={value}>{children}</RepositoryContext.Provider>
@@ -797,4 +433,3 @@ export function useRepository() {
   }
   return context
 }
-

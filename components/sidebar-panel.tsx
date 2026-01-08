@@ -7,7 +7,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { FileText, Map, GitBranch, Code2, Package, Settings, BookOpen, TestTube, Wrench, Palette, BarChart3 } from "lucide-react"
 import { useRepository } from "@/lib/repository-context"
-import { FileCategory } from "@/lib/types/repository"
 import { RepositoryMetrics as RepositoryMetricsView } from "@/components/repository-metrics"
 
 // Iconos por categoría
@@ -37,60 +36,14 @@ const categoryLabels: Record<FileCategory, string> = {
 }
 
 export function SidebarPanel() {
-  const { currentIndex, getFilesByCategory, reindexRepository } = useRepository()
-  const [branches, setBranches] = useState<string[]>([])
-  const [loadingBranches, setLoadingBranches] = useState(false)
+  const { repositoryId, status, statusData } = useRepository()
 
-  // Detectar si hay índice disponible
-  const hasIndex = currentIndex !== null
-
-  // Obtener ramas disponibles cuando hay un índice
-  useEffect(() => {
-    if (currentIndex?.owner && currentIndex?.repo) {
-      setLoadingBranches(true)
-      fetch(`/api/repository/branches?owner=${encodeURIComponent(currentIndex.owner)}&repo=${encodeURIComponent(currentIndex.repo)}`)
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.branches) {
-            setBranches(data.branches)
-          }
-        })
-        .catch((err) => {
-          console.error("Error al obtener ramas:", err)
-        })
-        .finally(() => {
-          setLoadingBranches(false)
-        })
-    }
-  }, [currentIndex?.owner, currentIndex?.repo])
-
-  // Handler para cambiar de rama
-  const handleBranchChange = async (newBranch: string) => {
-    if (!currentIndex || newBranch === currentIndex.branch) return
-    
-    try {
-      await reindexRepository(currentIndex.owner, currentIndex.repo, newBranch)
-    } catch (error) {
-      console.error("Error al cambiar de rama:", error)
-    }
-  }
-
-  // Obtener archivos por categoría cuando hay índice
-  const components = hasIndex ? getFilesByCategory("component") : []
-  const hooks = hasIndex ? getFilesByCategory("hook") : []
-  const services = hasIndex ? getFilesByCategory("service") : []
-  const configs = hasIndex ? getFilesByCategory("config") : []
-  const docs = hasIndex ? getFilesByCategory("docs") : []
-  const tests = hasIndex ? getFilesByCategory("test") : []
-  const utilities = hasIndex ? getFilesByCategory("utility") : []
-  const styles = hasIndex ? getFilesByCategory("style") : []
+  // Detectar si hay repositorio disponible
+  const hasRepository = status === "ready"
 
   // Obtener lenguajes principales (top 5)
-  const topLanguages = hasIndex && currentIndex?.summary?.languages
-    ? Object.entries(currentIndex.summary.languages)
-        .sort(([, a], [, b]) => b - a)
-        .slice(0, 5)
-        .map(([lang]) => lang)
+  const topLanguages = hasRepository && statusData?.stats?.languages
+    ? statusData.stats.languages.slice(0, 5)
     : []
 
   return (
@@ -122,23 +75,19 @@ export function SidebarPanel() {
         <ScrollArea className="flex-1 min-h-0 p-3">
           <TabsContent value="architecture" className="mt-0">
             <div className="space-y-4">
-              {hasIndex ? (
+              {hasRepository ? (
                 <>
                   <div>
                     <h3 className="font-semibold mb-2 text-foreground">Resumen del Repositorio</h3>
                     <div className="space-y-2 text-sm text-muted-foreground">
                       <div className="flex justify-between">
                         <span>Archivos totales:</span>
-                        <span className="font-medium text-foreground">{currentIndex?.summary?.totalFiles.toLocaleString() ?? 0}</span>
+                        <span className="font-medium text-foreground">{statusData?.stats?.totalFiles?.toLocaleString() ?? 0}</span>
                       </div>
-                      <div className="flex justify-between">
-                        <span>Líneas de código:</span>
-                        <span className="font-medium text-foreground">{currentIndex?.summary?.totalLines.toLocaleString() ?? 0}</span>
-                      </div>
-                      {currentIndex?.metadata?.language && (
+                      {statusData?.stats?.totalSize && (
                         <div className="flex justify-between">
-                          <span>Lenguaje principal:</span>
-                          <span className="font-medium text-foreground">{currentIndex.metadata.language}</span>
+                          <span>Tamaño total:</span>
+                          <span className="font-medium text-foreground">{(statusData.stats.totalSize / 1024).toFixed(2)} KB</span>
                         </div>
                       )}
                     </div>
@@ -160,31 +109,6 @@ export function SidebarPanel() {
                     </div>
                   )}
 
-                  <div>
-                    <h3 className="font-semibold mb-2 text-foreground">Estructura por Categorías</h3>
-                    <div className="space-y-2 text-sm">
-                      {Object.entries(currentIndex?.summary?.categories ?? {}).map(([category, count]) => {
-                        if (count === 0) return null
-                        const Icon = categoryIcons[category as FileCategory]
-                        return (
-                          <div key={category} className="flex items-center justify-between text-muted-foreground">
-                            <div className="flex items-center gap-2">
-                              {Icon && <Icon className="h-4 w-4" />}
-                              <span>{categoryLabels[category as FileCategory]}</span>
-                            </div>
-                            <span className="font-medium text-foreground">{count}</span>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-
-                  {currentIndex?.metadata?.description && (
-                    <div>
-                      <h3 className="font-semibold mb-2 text-foreground">Descripción</h3>
-                      <p className="text-sm text-muted-foreground leading-relaxed">{currentIndex.metadata.description}</p>
-                    </div>
-                  )}
                 </>
               ) : (
                 <>
@@ -223,125 +147,11 @@ export function SidebarPanel() {
 
           <TabsContent value="modules" className="mt-0">
             <div className="space-y-4">
-              {hasIndex ? (
-                <>
-                  {components.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-2">
-                        <Code2 className="h-4 w-4 text-primary" />
-                        <h3 className="font-semibold text-foreground">Componentes</h3>
-                        <span className="text-xs text-muted-foreground">({components.length})</span>
-                      </div>
-                      <p className="text-sm text-muted-foreground leading-relaxed">
-                        {components.length} componente{components.length !== 1 ? "s" : ""} React reutilizable{components.length !== 1 ? "s" : ""} para la interfaz de usuario.
-                      </p>
-                    </div>
-                  )}
-
-                  {hooks.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-2">
-                        <GitBranch className="h-4 w-4 text-primary" />
-                        <h3 className="font-semibold text-foreground">Hooks</h3>
-                        <span className="text-xs text-muted-foreground">({hooks.length})</span>
-                      </div>
-                      <p className="text-sm text-muted-foreground leading-relaxed">
-                        {hooks.length} hook{hooks.length !== 1 ? "s" : ""} personalizado{hooks.length !== 1 ? "s" : ""} para lógica reutilizable.
-                      </p>
-                    </div>
-                  )}
-
-                  {services.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-2">
-                        <Package className="h-4 w-4 text-primary" />
-                        <h3 className="font-semibold text-foreground">Servicios</h3>
-                        <span className="text-xs text-muted-foreground">({services.length})</span>
-                      </div>
-                      <p className="text-sm text-muted-foreground leading-relaxed">
-                        {services.length} servicio{services.length !== 1 ? "s" : ""} y endpoint{services.length !== 1 ? "s" : ""} de API para manejo de datos.
-                      </p>
-                    </div>
-                  )}
-
-                  {configs.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-2">
-                        <Settings className="h-4 w-4 text-primary" />
-                        <h3 className="font-semibold text-foreground">Configuración</h3>
-                        <span className="text-xs text-muted-foreground">({configs.length})</span>
-                      </div>
-                      <p className="text-sm text-muted-foreground leading-relaxed">
-                        {configs.length} archivo{configs.length !== 1 ? "s" : ""} de configuración del proyecto.
-                      </p>
-                    </div>
-                  )}
-
-                  {docs.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-2">
-                        <BookOpen className="h-4 w-4 text-primary" />
-                        <h3 className="font-semibold text-foreground">Documentación</h3>
-                        <span className="text-xs text-muted-foreground">({docs.length})</span>
-                      </div>
-                      <p className="text-sm text-muted-foreground leading-relaxed">
-                        {docs.length} archivo{docs.length !== 1 ? "s" : ""} de documentación y guías.
-                      </p>
-                    </div>
-                  )}
-
-                  {tests.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-2">
-                        <TestTube className="h-4 w-4 text-primary" />
-                        <h3 className="font-semibold text-foreground">Tests</h3>
-                        <span className="text-xs text-muted-foreground">({tests.length})</span>
-                      </div>
-                      <p className="text-sm text-muted-foreground leading-relaxed">
-                        {tests.length} archivo{tests.length !== 1 ? "s" : ""} de pruebas automatizadas.
-                      </p>
-                    </div>
-                  )}
-
-                  {utilities.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-2">
-                        <Wrench className="h-4 w-4 text-primary" />
-                        <h3 className="font-semibold text-foreground">Utilidades</h3>
-                        <span className="text-xs text-muted-foreground">({utilities.length})</span>
-                      </div>
-                      <p className="text-sm text-muted-foreground leading-relaxed">
-                        {utilities.length} utilidad{utilities.length !== 1 ? "es" : ""} y función{utilities.length !== 1 ? "es" : ""} auxiliar{utilities.length !== 1 ? "es" : ""}.
-                      </p>
-                    </div>
-                  )}
-
-                  {styles.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-2">
-                        <Palette className="h-4 w-4 text-primary" />
-                        <h3 className="font-semibold text-foreground">Estilos</h3>
-                        <span className="text-xs text-muted-foreground">({styles.length})</span>
-                      </div>
-                      <p className="text-sm text-muted-foreground leading-relaxed">
-                        {styles.length} archivo{styles.length !== 1 ? "s" : ""} de estilos CSS/SCSS.
-                      </p>
-                    </div>
-                  )}
-
-                  {components.length === 0 &&
-                    hooks.length === 0 &&
-                    services.length === 0 &&
-                    configs.length === 0 &&
-                    docs.length === 0 &&
-                    tests.length === 0 &&
-                    utilities.length === 0 &&
-                    styles.length === 0 && (
-                      <div className="text-sm text-muted-foreground">
-                        <p>No se detectaron módulos en este repositorio.</p>
-                      </div>
-                    )}
-                </>
+              {hasRepository ? (
+                <div className="text-sm text-muted-foreground">
+                  <p>La información detallada de módulos está disponible en el backend.</p>
+                  <p className="mt-2">Usa el chat para consultar sobre la estructura del repositorio.</p>
+                </div>
               ) : (
                 <>
                   <div>
@@ -378,8 +188,8 @@ export function SidebarPanel() {
                 <h3 className="font-semibold mb-2 text-foreground">Flujo de Consulta</h3>
                 <ol className="space-y-2 text-sm text-muted-foreground list-decimal list-inside">
                   <li>Usuario ingresa pregunta</li>
-                  <li>Sistema analiza el contexto{hasIndex && " del repositorio indexado"}</li>
-                  <li>Busca archivos relevantes{hasIndex && ` (${currentIndex?.summary.totalFiles || 0} disponibles)`}</li>
+                  <li>Sistema analiza el contexto del repositorio indexado</li>
+                  <li>Busca archivos relevantes{hasRepository && statusData?.stats?.totalFiles ? ` (${statusData.stats.totalFiles} disponibles)` : ""}</li>
                   <li>Genera respuesta</li>
                   <li>Muestra archivos utilizados</li>
                 </ol>
@@ -389,43 +199,19 @@ export function SidebarPanel() {
                 <ol className="space-y-2 text-sm text-muted-foreground list-decimal list-inside">
                   <li>Usuario explora sidebar</li>
                   <li>Selecciona sección</li>
-                  <li>Visualiza documentación{hasIndex && " del repositorio"}</li>
+                  <li>Visualiza documentación del repositorio</li>
                   <li>Puede hacer preguntas relacionadas</li>
                 </ol>
               </div>
-              {hasIndex && currentIndex && (
+              {hasRepository && repositoryId && (
                 <div>
                   <h3 className="font-semibold mb-2 text-foreground">Flujo de Indexación</h3>
                   <ol className="space-y-2 text-sm text-muted-foreground list-decimal list-inside">
-                    <li>Repositorio indexado: {currentIndex.id}</li>
-                    <li className="flex items-center gap-2">
-                      <span>Rama:</span>
-                      <Select
-                        value={currentIndex.branch}
-                        onValueChange={handleBranchChange}
-                        disabled={loadingBranches || branches.length === 0}
-                      >
-                        <SelectTrigger className="h-7 w-auto min-w-[120px] text-xs gap-1">
-                          <GitBranch className="h-3 w-3 shrink-0" />
-                          <SelectValue placeholder="Cargando ramas..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {branches.map((branch) => (
-                            <SelectItem key={branch} value={branch}>
-                              <div className="flex items-center gap-2">
-                                <GitBranch className="h-3 w-3" />
-                                {branch}
-                                {branch === currentIndex.branch && (
-                                  <span className="text-xs text-muted-foreground">(actual)</span>
-                                )}
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </li>
-                    <li>Última actualización: {new Date(currentIndex.indexedAt).toLocaleDateString()}</li>
-                    <li>Estado: {currentIndex.status === "completed" ? "Completado" : "En proceso"}</li>
+                    <li>Repositorio indexado: {repositoryId}</li>
+                    {statusData?.indexedAt && (
+                      <li>Última actualización: {new Date(statusData.indexedAt).toLocaleDateString()}</li>
+                    )}
+                    <li>Estado: Listo</li>
                   </ol>
                 </div>
               )}

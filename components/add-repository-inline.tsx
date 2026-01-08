@@ -76,7 +76,9 @@ export function AddRepositoryInline({ isOpen, onClose }: AddRepositoryInlineProp
     }
 
     try {
-      await indexRepository(parsed.owner, parsed.repo, parsed.branch)
+      // Construir repositoryId según contrato: github:owner:repo
+      const repositoryId = `github:${parsed.owner}:${parsed.repo}`
+      await indexRepository(repositoryId)
       // Colapsar y limpiar después de iniciar indexación
       setUrl("")
       setError(null)

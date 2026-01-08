@@ -18,7 +18,6 @@ import {
   AlertCircle,
   GitBranch,
   RefreshCw,
-  AlertTriangle,
   Github,
 } from "lucide-react"
 import { useRepository } from "@/lib/repository-context"
@@ -27,66 +26,21 @@ import { AddRepositoryInline } from "./add-repository-inline"
 import { GitHubRepoSelector } from "./github-repo-selector"
 
 export function HeaderRepository() {
-  const { repositoryId, status, loading, currentIndex, reindexRepository, indexRepository } =
+  const { repositoryId, status, loading, statusData, indexRepository, refreshStatus } =
     useRepository()
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [githubSelectorOpen, setGithubSelectorOpen] = useState(false)
-  const [branches, setBranches] = useState<string[]>([])
-  const [loadingBranches, setLoadingBranches] = useState(false)
-  const [hasUpdates, setHasUpdates] = useState(false)
   const [reindexing, setReindexing] = useState(false)
   const [githubConnected, setGithubConnected] = useState<boolean | null>(null)
 
-  /* =======================
-     Cargar ramas
-  ======================= */
-  useEffect(() => {
-    if (currentIndex?.owner && currentIndex?.repo && status === "completed") {
-      setLoadingBranches(true)
-      fetch(
-        `/api/repository/branches?owner=${encodeURIComponent(
-          currentIndex.owner
-        )}&repo=${encodeURIComponent(currentIndex.repo)}`
-      )
-        .then((res) => res.json())
-        .then((data) => setBranches(data.branches || []))
-        .catch(() => setBranches([]))
-        .finally(() => setLoadingBranches(false))
-    }
-  }, [currentIndex?.owner, currentIndex?.repo, status])
-
-  /* =======================
-     Verificar updates
-  ======================= */
-  useEffect(() => {
-    if (!currentIndex || status !== "completed") {
-      setHasUpdates(false)
-      return
-    }
-
-    const check = async () => {
-      try {
-        const res = await fetch(
-          `/api/repository/check-updates?owner=${encodeURIComponent(
-            currentIndex.owner
-          )}&repo=${encodeURIComponent(
-            currentIndex.repo
-          )}&branch=${encodeURIComponent(currentIndex.branch)}`
-        )
-        if (res.ok) {
-          const data = await res.json()
-          setHasUpdates(Boolean(data.hasUpdates))
-        }
-      } catch {
-        setHasUpdates(false)
-      }
-    }
-
-    check()
-    const id = setInterval(check, 30000)
-    return () => clearInterval(id)
-  }, [currentIndex, status])
+  // Parsear repositoryId para obtener owner/repo
+  const parsedRepo = repositoryId
+    ? (() => {
+        const parts = repositoryId.replace("github:", "").split(":")
+        return parts.length === 2 ? { owner: parts[0], repo: parts[1] } : null
+      })()
+    : null
 
 
   useEffect(() => {
@@ -131,20 +85,19 @@ export function HeaderRepository() {
      Handlers
   ======================= */
   const handleBranchChange = async (branch: string) => {
-    if (!currentIndex || branch === currentIndex.branch) return
-    await reindexRepository(currentIndex.owner, currentIndex.repo, branch)
+    if (!repositoryInfo || branch === repositoryInfo.branch) return
+    await indexRepository(repositoryInfo.owner!, repositoryInfo.repo!, branch)
   }
 
   const handleReindex = async () => {
-    if (!currentIndex || reindexing) return
+    if (!repositoryInfo || reindexing) return
     setReindexing(true)
     try {
-      await reindexRepository(
-        currentIndex.owner,
-        currentIndex.repo,
-        currentIndex.branch
+      await indexRepository(
+        repositoryInfo.owner!,
+        repositoryInfo.repo!,
+        repositoryInfo.branch || "main"
       )
-      setHasUpdates(false)
     } finally {
       setReindexing(false)
     }
@@ -155,11 +108,13 @@ export function HeaderRepository() {
     repo: string
     branch: string
   }) => {
-    await indexRepository(repo.owner, repo.repo, repo.branch)
+    // Construir repositoryId según contrato: github:owner:repo
+    const repositoryId = `github:${repo.owner}:${repo.repo}`
+    await indexRepository(repositoryId)
   }
 
-  const repositoryDisplay = currentIndex
-    ? `${currentIndex.owner}/${currentIndex.repo}@${currentIndex.branch}`
+  const repositoryDisplay = repositoryInfo
+    ? `${repositoryInfo.owner}/${repositoryInfo.repo}${repositoryInfo.branch ? `@${repositoryInfo.branch}` : ""}`
     : repositoryId || "Sin repositorio"
 
   /* =======================
@@ -167,11 +122,7 @@ export function HeaderRepository() {
   ======================= */
   return (
     <div
-      className={`flex flex-col flex-1 min-w-0 rounded-md ${
-        hasUpdates
-          ? "bg-amber-500/10 border border-amber-500/40 p-2"
-          : ""
-      }`}
+      className="flex flex-col flex-1 min-w-0 rounded-md"
     >
       <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 min-w-0">
         {/* Repo */}
@@ -201,12 +152,6 @@ export function HeaderRepository() {
             </TooltipContent>
           </Tooltip>
 
-          {hasUpdates && (
-            <span className="flex items-center gap-1 text-xs text-amber-700">
-              <AlertTriangle className="h-3 w-3" />
-              Hay cambios sin indexar
-            </span>
-          )}
         </div>
 
         {/* Estado */}
@@ -218,24 +163,16 @@ export function HeaderRepository() {
             </Badge>
           )}
 
-          {status === "completed" && currentIndex && branches.length > 0 && (
-            <Select
-              value={currentIndex.branch}
-              onValueChange={handleBranchChange}
-              disabled={loadingBranches || loading}
-            >
-              <SelectTrigger className="h-6 text-xs">
-                <GitBranch className="h-3 w-3" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {branches.map((b) => (
-                  <SelectItem key={b} value={b}>
-                    {b}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          {status === "ready" && (
+            <Badge variant="default" className="gap-1 h-6 text-xs">
+              Listo
+            </Badge>
+          )}
+
+          {status === "idle" && (
+            <Badge variant="outline" className="gap-1 h-6 text-xs">
+              Sin indexar
+            </Badge>
           )}
 
           {status === "error" && (
@@ -248,12 +185,12 @@ export function HeaderRepository() {
 
         {/* Acciones */}
         <div className="flex items-center gap-1.5 shrink-0">
-          {status === "completed" && currentIndex && (
+          {status === "ready" && repositoryId && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   size="sm"
-                  variant={hasUpdates ? "default" : "outline"}
+                  variant="outline"
                   onClick={handleReindex}
                   disabled={reindexing}
                   className="h-6 text-xs gap-1"
@@ -267,6 +204,28 @@ export function HeaderRepository() {
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Actualizar repositorio</TooltipContent>
+            </Tooltip>
+          )}
+
+          {status === "idle" && repositoryId && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={() => indexRepository(repositoryId)}
+                  disabled={loading}
+                  className="h-6 text-xs gap-1"
+                >
+                  {loading ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Plus className="h-3 w-3" />
+                  )}
+                  Indexar
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Indexar repositorio</TooltipContent>
             </Tooltip>
           )}
 
