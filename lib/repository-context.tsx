@@ -258,6 +258,9 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
           force,
         }
 
+        // Log del payload antes del fetch
+        console.log("Index request payload:", { repositoryId: repoId })
+
         const response = await fetch("/api/repositories/index", {
           method: "POST",
           headers: {

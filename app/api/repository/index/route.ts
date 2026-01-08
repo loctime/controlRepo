@@ -57,17 +57,47 @@ export async function POST(request: NextRequest) {
     }
     console.log(`[INDEX] Access_token de GitHub obtenido para usuario ${uid}`)
 
-    // 3) Validar parámetros
+    // 3) Validar parámetros según contrato API v1
     const body = await request.json()
-    const { owner, repo, branch } = body
-    console.log(`[INDEX] Parámetros recibidos: owner=${owner}, repo=${repo}, branch=${branch || "main"}`)
+    const { repositoryId, force } = body
+    console.log(`[INDEX] Parámetros recibidos: repositoryId=${repositoryId}, force=${force || false}`)
 
-    if (!owner || !repo) {
+    if (!repositoryId || typeof repositoryId !== "string") {
       return NextResponse.json(
-        { error: "owner y repo son requeridos" },
+        { error: "repositoryId es requerido (formato: github:owner:repo)" },
         { status: 400 }
       )
     }
+
+    // Validar formato: github:owner:repo
+    if (!repositoryId.startsWith("github:")) {
+      return NextResponse.json(
+        { error: "repositoryId debe tener formato: github:owner:repo" },
+        { status: 400 }
+      )
+    }
+
+    // Parsear repositoryId
+    const parts = repositoryId.replace("github:", "").split(":")
+    if (parts.length !== 2) {
+      return NextResponse.json(
+        { error: "repositoryId inválido. Formato esperado: github:owner:repo" },
+        { status: 400 }
+      )
+    }
+
+    const owner = parts[0].trim()
+    const repo = parts[1].trim()
+    const branch = "main" // Por defecto, el backend puede usar main
+
+    if (!owner || !repo) {
+      return NextResponse.json(
+        { error: "repositoryId inválido: owner o repo vacíos" },
+        { status: 400 }
+      )
+    }
+
+    console.log(`[INDEX] Parseado: owner=${owner}, repo=${repo}, branch=${branch}`)
 
     // 4) Hacer POST HTTP a ControlFile (Render)
     const controlFileUrl = process.env.CONTROLFILE_URL || process.env.NEXT_PUBLIC_CONTROLFILE_URL
