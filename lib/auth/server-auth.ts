@@ -21,6 +21,15 @@ let db: Firestore | undefined
  * Inicializa Firebase Admin SDK
  */
 export function initializeFirebaseAdmin(): { auth: Auth; db: Firestore } {
+  // [FIREBASE ENV CHECK] - Verificar variable de entorno SIEMPRE (incluso si ya está inicializado)
+  const envCheckKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY
+  console.log("[FIREBASE ENV CHECK]", {
+    exists: !!envCheckKey,
+    type: typeof envCheckKey,
+    previewStart: envCheckKey ? envCheckKey.substring(0, 30) : null,
+    previewEnd: envCheckKey && envCheckKey.length > 30 ? envCheckKey.substring(envCheckKey.length - 30) : null,
+  })
+
   // Log: Verificar si ya está inicializado en memoria
   if (auth && db) {
     console.log("[AUTH] Firebase Admin ya inicializado en memoria, reutilizando instancia")
