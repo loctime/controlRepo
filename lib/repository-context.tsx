@@ -125,9 +125,16 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
   /**
    * Carga las métricas del repositorio desde el API
+   * TEMPORALMENTE DESACTIVADO: El backend no expone el endpoint /api/repository/metrics (Fase 1)
    */
   const loadMetrics = useCallback(
     async (owner: string, repo: string, branch: string = "main") => {
+      // Guard clause: desactivar temporalmente las llamadas a /api/repository/metrics
+      // El sistema funcionará solo con /api/repository/status
+      setCurrentMetrics(null)
+      return
+
+      /* CÓDIGO DESACTIVADO TEMPORALMENTE - Fase 1
       try {
         const response = await fetch(
           `/api/repository/metrics?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&branch=${encodeURIComponent(branch)}`
@@ -150,6 +157,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         // Las métricas son opcionales y no deberían bloquear el flujo
         setCurrentMetrics(null)
       }
+      */
     },
     []
   )
