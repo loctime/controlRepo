@@ -47,7 +47,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const register = async (email: string, password: string) => {
     if (!auth) throw new Error("Firebase Auth no está inicializado")
     const userCredential = await createUserWithEmailAndPassword(auth, email, password)
-    // Inicializar documento de usuario solo en /apps/auditoria/users/{uid}
+    // Inicializar documento de usuario solo en /apps/controlrepo/users/{uid}
     // La inicialización de carpetas es responsabilidad exclusiva de ControlFile API
     await initializeUserDocument(userCredential.user.uid, email)
   }

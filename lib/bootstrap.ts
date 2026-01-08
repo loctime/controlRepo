@@ -2,11 +2,11 @@ import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore"
 import { db } from "./firebase"
 
 /**
- * Inicializa el documento de usuario en /apps/auditoria/users/{uid}
+ * Inicializa el documento de usuario en /apps/controlrepo/users/{uid}
  * Solo crea metadata básica del usuario.
  * 
  * REGLA ARQUITECTÓNICA:
- * - ControlAudit solo puede escribir en /apps/auditoria/**
+ * - ControlRepo usa /apps/controlrepo/users/{uid} como raíz del usuario
  * - NO inicializa carpetas (eso es responsabilidad de ControlFile API)
  * - NO escribe en /apps/controlfile/**
  * - Solo metadata básica del usuario
@@ -14,8 +14,8 @@ import { db } from "./firebase"
 export async function initializeUserDocument(uid: string, email: string | null = null): Promise<void> {
   if (typeof window === "undefined" || !db) return
 
-  // Namespace obligatorio: /apps/auditoria/users/{uid}
-  const userPath = `apps/auditoria/users/${uid}`
+  // Namespace obligatorio: /apps/controlrepo/users/{uid}
+  const userPath = `apps/controlrepo/users/${uid}`
   const userRef = doc(db, userPath)
 
   try {
