@@ -18,6 +18,7 @@ interface RepositoryContextType {
   loading: boolean
   error: string | null
   repositoryId: string | null
+  preferencesLoaded: boolean
 
   // Acciones
   indexRepository: (owner: string, repo: string, branch?: string) => Promise<void>
@@ -38,9 +39,18 @@ const POLLING_INTERVAL = 4000 // 4 segundos (entre 3-5 segundos)
 
 /**
  * Construye repositoryId en formato: github:owner:repo
+ * Valida que owner y repo sean válidos antes de construir
  */
-function buildRepositoryId(owner: string, repo: string): string {
-  return `github:${owner}:${repo}`
+function buildRepositoryId(owner: string, repo: string): string | null {
+  if (!owner || !repo || typeof owner !== "string" || typeof repo !== "string") {
+    return null
+  }
+  const trimmedOwner = owner.trim()
+  const trimmedRepo = repo.trim()
+  if (!trimmedOwner || !trimmedRepo) {
+    return null
+  }
+  return `github:${trimmedOwner}:${trimmedRepo}`
 }
 
 /**
@@ -213,14 +223,31 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
    */
   const startPolling = useCallback(
     (owner: string, repo: string) => {
+      // Validar owner y repo antes de continuar
+      if (!owner || !repo || typeof owner !== "string" || typeof repo !== "string") {
+        console.warn(`[startPolling] owner o repo inválidos: owner="${owner}", repo="${repo}"`)
+        return
+      }
+
       // Detener polling anterior si existe
       stopPolling()
 
       const repositoryId = buildRepositoryId(owner, repo)
+      if (!repositoryId) {
+        console.warn(`[startPolling] No se pudo construir repositoryId válido para owner="${owner}", repo="${repo}"`)
+        return
+      }
       pollingRef.current.repositoryId = repositoryId
 
       const poll = async () => {
         try {
+          // Guard clause adicional: no hacer fetch si repositoryId es inválido
+          if (!repositoryId || repositoryId === "undefined" || repositoryId.includes("undefined") || repositoryId.includes("null")) {
+            console.warn(`[startPolling] repositoryId inválido en poll: "${repositoryId}"`)
+            stopPolling()
+            return
+          }
+
           const response = await fetch(
             `/api/repository/status/${repositoryId}`
           )
@@ -252,9 +279,20 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
           }
           
           // Normalizar repositoryId al formato github:owner:repo
-          const normalizedRepoId = statusResponse.repositoryId.startsWith("github:") 
-            ? statusResponse.repositoryId 
-            : buildRepositoryId(owner, repo)
+          let normalizedRepoId: string | null = null
+          if (statusResponse.repositoryId.startsWith("github:")) {
+            normalizedRepoId = statusResponse.repositoryId
+          } else {
+            normalizedRepoId = buildRepositoryId(owner, repo)
+          }
+
+          // Validar que normalizedRepoId sea válido
+          if (!normalizedRepoId) {
+            console.warn(`[startPolling] No se pudo normalizar repositoryId. statusResponse.repositoryId="${statusResponse.repositoryId}", owner="${owner}", repo="${repo}"`)
+            stopPolling()
+            return
+          }
+
           setRepositoryId(normalizedRepoId)
 
           if (statusResponse.status === "completed") {
@@ -320,10 +358,27 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
    */
   const indexRepository = useCallback(
     async (owner: string, repo: string, branch: string = "main") => {
+      // Validar owner y repo antes de continuar
+      if (!owner || !repo || typeof owner !== "string" || typeof repo !== "string") {
+        const errorMessage = `owner o repo inválidos: owner="${owner}", repo="${repo}"`
+        console.warn(`[indexRepository] ${errorMessage}`)
+        setError(errorMessage)
+        setStatus("error")
+        return
+      }
+
       setLoading(true)
       setError(null)
       setStatus("indexing")
       const repositoryId = buildRepositoryId(owner, repo)
+      if (!repositoryId) {
+        const errorMessage = `No se pudo construir repositoryId válido para owner="${owner}", repo="${repo}"`
+        console.warn(`[indexRepository] ${errorMessage}`)
+        setError(errorMessage)
+        setStatus("error")
+        setLoading(false)
+        return
+      }
       setRepositoryId(repositoryId)
       setCurrentIndex(null)
       setCurrentMetrics(null)
@@ -380,10 +435,27 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
    */
   const reindexRepository = useCallback(
     async (owner: string, repo: string, branch: string = "main") => {
+      // Validar owner y repo antes de continuar
+      if (!owner || !repo || typeof owner !== "string" || typeof repo !== "string") {
+        const errorMessage = `owner o repo inválidos: owner="${owner}", repo="${repo}"`
+        console.warn(`[reindexRepository] ${errorMessage}`)
+        setError(errorMessage)
+        setStatus("error")
+        return
+      }
+
       setLoading(true)
       setError(null)
       setStatus("indexing")
       const repositoryId = buildRepositoryId(owner, repo)
+      if (!repositoryId) {
+        const errorMessage = `No se pudo construir repositoryId válido para owner="${owner}", repo="${repo}"`
+        console.warn(`[reindexRepository] ${errorMessage}`)
+        setError(errorMessage)
+        setStatus("error")
+        setLoading(false)
+        return
+      }
       setRepositoryId(repositoryId)
       setCurrentIndex(null)
       setCurrentMetrics(null)
@@ -429,11 +501,31 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
    */
   const refreshStatus = useCallback(
     async (owner: string, repo: string, branch: string = "main") => {
+      // Validar owner y repo antes de continuar
+      if (!owner || !repo || typeof owner !== "string" || typeof repo !== "string") {
+        console.warn(`[refreshStatus] owner o repo inválidos: owner="${owner}", repo="${repo}"`)
+        setLoading(false)
+        return
+      }
+
       setLoading(true)
       setError(null)
 
       try {
         const repositoryId = buildRepositoryId(owner, repo)
+        if (!repositoryId) {
+          console.warn(`[refreshStatus] No se pudo construir repositoryId válido para owner="${owner}", repo="${repo}"`)
+          setLoading(false)
+          return
+        }
+
+        // Guard clause adicional: no hacer fetch si repositoryId es inválido
+        if (repositoryId === "undefined" || repositoryId.includes("undefined") || repositoryId.includes("null")) {
+          console.warn(`[refreshStatus] repositoryId inválido: "${repositoryId}"`)
+          setLoading(false)
+          return
+        }
+
         const response = await fetch(
           `/api/repository/status/${repositoryId}`
         )
@@ -466,9 +558,20 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         }
         
         // Normalizar repositoryId al formato github:owner:repo
-        const normalizedRepoId = statusResponse.repositoryId.startsWith("github:") 
-          ? statusResponse.repositoryId 
-          : buildRepositoryId(owner, repo)
+        let normalizedRepoId: string | null = null
+        if (statusResponse.repositoryId.startsWith("github:")) {
+          normalizedRepoId = statusResponse.repositoryId
+        } else {
+          normalizedRepoId = buildRepositoryId(owner, repo)
+        }
+
+        // Validar que normalizedRepoId sea válido
+        if (!normalizedRepoId) {
+          console.warn(`[refreshStatus] No se pudo normalizar repositoryId. statusResponse.repositoryId="${statusResponse.repositoryId}", owner="${owner}", repo="${repo}"`)
+          setLoading(false)
+          return
+        }
+
         setRepositoryId(normalizedRepoId)
 
         if (statusResponse.status === "indexing") {
@@ -651,6 +754,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
     loading,
     error,
     repositoryId,
+    preferencesLoaded,
     indexRepository,
     reindexRepository,
     refreshStatus,

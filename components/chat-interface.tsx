@@ -30,6 +30,11 @@ function parseRepositoryId(repositoryId: string): { owner: string; repo: string 
   if (!trimmed) {
     return null
   }
+
+  // Validar que no contenga "undefined" o "null"
+  if (trimmed === "undefined" || trimmed.includes("undefined") || trimmed.includes("null")) {
+    return null
+  }
   
   // Formato: github:owner:repo
   if (trimmed.startsWith("github:")) {
@@ -37,7 +42,8 @@ function parseRepositoryId(repositoryId: string): { owner: string; repo: string 
     if (parts.length === 2) {
       const owner = parts[0].trim()
       const repo = parts[1].trim()
-      if (owner && repo) {
+      // Validar que owner y repo no sean "undefined" o "null"
+      if (owner && repo && owner !== "undefined" && repo !== "undefined" && owner !== "null" && repo !== "null") {
         return { owner, repo }
       }
     }
@@ -51,7 +57,7 @@ export function ChatInterface() {
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
 
-  const { repositoryId } = useRepository()
+  const { repositoryId, preferencesLoaded } = useRepository()
   const { setContextFiles } = useContextFiles()
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -78,13 +84,33 @@ export function ChatInterface() {
    * Mensaje inicial: resumen del repositorio
    * ------------------------------------------- */
   useEffect(() => {
-    if (!repositoryId) return
+    // Esperar a que las preferencias se carguen antes de ejecutar
+    if (!preferencesLoaded) {
+      return
+    }
+
+    // Guard clauses: no ejecutar si repositoryId es inválido
+    if (!repositoryId || typeof repositoryId !== "string") {
+      return
+    }
+
+    // Validar que repositoryId no contenga "undefined" o "null"
+    if (repositoryId === "undefined" || repositoryId.includes("undefined") || repositoryId.includes("null")) {
+      console.warn(`[ChatInterface] repositoryId inválido: "${repositoryId}"`)
+      return
+    }
 
     const loadRepositorySummary = async () => {
       try {
         const parsed = parseRepositoryId(repositoryId)
         if (!parsed) {
           console.warn(`[ChatInterface] Formato inválido de repositoryId: "${repositoryId}"`)
+          return
+        }
+
+        // Guard clause adicional antes de hacer fetch
+        if (!repositoryId || repositoryId === "undefined" || repositoryId.includes("undefined") || repositoryId.includes("null")) {
+          console.warn(`[ChatInterface] repositoryId inválido antes de fetch: "${repositoryId}"`)
           return
         }
 
@@ -136,7 +162,7 @@ export function ChatInterface() {
     }
 
     loadRepositorySummary()
-  }, [repositoryId])
+  }, [repositoryId, preferencesLoaded])
 
   /* -------------------------------------------
    * Cancelar request
