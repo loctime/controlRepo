@@ -27,19 +27,44 @@ function parseRepositoryId(repositoryId: string): { owner: string; repo: string 
 
 /**
  * Busca un índice en el filesystem local
- * Intenta primero con branches comunes, luego busca archivos que coincidan con el patrón
+ * El backend de Render guarda con formato: github:owner:repo.json
+ * Pero el código local usa formato: owner/repo/branch.json (normalizado a owner_repo_branch.json)
+ * 
+ * Intentamos ambos formatos para compatibilidad
  */
-async function findIndexInFilesystem(owner: string, repo: string): Promise<{ index: any; branch: string } | null> {
-  // PASO 1: Intentar con branches comunes primero (más rápido)
+async function findIndexInFilesystem(repositoryId: string, owner: string, repo: string): Promise<{ index: any; branch: string } | null> {
+  // PASO 1: Intentar con el formato del backend de Render: github:owner:repo
+  // Normalizar para filesystem: github:owner:repo -> github_owner_repo.json
+  try {
+    const normalizedBackendFormat = normalizeRepositoryIdForFile(repositoryId)
+    const storageDir = join(process.cwd(), ".repository-indexes")
+    const backendFormatPath = join(storageDir, `${normalizedBackendFormat}.json`)
+    
+    const { readFile } = await import("fs/promises")
+    const content = await readFile(backendFormatPath, "utf-8")
+    const index = JSON.parse(content)
+    
+    if (index && index.branch) {
+      console.log(`[STATUS] Índice encontrado en filesystem local (formato backend): ${repositoryId}`)
+      return { index, branch: index.branch }
+    }
+  } catch (error: any) {
+    // Archivo no existe o error de lectura, continuar
+    if (error?.code !== "ENOENT") {
+      console.log(`[STATUS] Error al leer índice en formato backend: ${error instanceof Error ? error.message : "Error desconocido"}`)
+    }
+  }
+  
+  // PASO 2: Intentar con formato local: owner/repo/branch
   const possibleBranches = ["main", "master", "develop", "dev"]
   
   for (const branch of possibleBranches) {
-    const repositoryId = `${owner}/${repo}/${branch}`
+    const localRepositoryId = `${owner}/${repo}/${branch}`
     
     try {
-      const index = await getRepositoryIndex(repositoryId)
+      const index = await getRepositoryIndex(localRepositoryId)
       if (index) {
-        console.log(`[STATUS] Índice encontrado en filesystem local: ${repositoryId}`)
+        console.log(`[STATUS] Índice encontrado en filesystem local (formato local): ${localRepositoryId}`)
         return { index, branch }
       }
     } catch (error) {
@@ -48,7 +73,7 @@ async function findIndexInFilesystem(owner: string, repo: string): Promise<{ ind
     }
   }
   
-  // PASO 2: Si no se encontró con branches comunes, buscar archivos que coincidan con el patrón
+  // PASO 3: Buscar archivos que coincidan con el patrón owner_repo_*
   try {
     const storageDir = join(process.cwd(), ".repository-indexes")
     const prefix = normalizeRepositoryIdForFile(`${owner}/${repo}/`)
@@ -126,8 +151,8 @@ export async function GET(
     const { owner, repo } = parsed
 
     // PASO 1: Verificar si existe el índice en filesystem local
-    console.log(`[STATUS] Verificando filesystem local para ${owner}/${repo}`)
-    const localIndex = await findIndexInFilesystem(owner, repo)
+    console.log(`[STATUS] Verificando filesystem local para ${repositoryId}`)
+    const localIndex = await findIndexInFilesystem(repositoryId, owner, repo)
     
     if (localIndex) {
       const { index, branch } = localIndex

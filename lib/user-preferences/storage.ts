@@ -128,29 +128,65 @@ export async function getUserPreferences(userId: string): Promise<UserPreference
  */
 export async function saveUserPreferences(preferences: UserPreferences): Promise<void> {
   // Asegurar que el documento usuario exista antes de escribir preferencias
-  await ensureUserDocumentExists(preferences.userId)
+  try {
+    await ensureUserDocumentExists(preferences.userId)
+  } catch (error) {
+    // Si falla la creación del documento usuario, lanzar el error
+    throw error
+  }
 
-  const { db } = initializeFirebaseAdmin()
+  // Inicializar Firebase Admin (puede reutilizar la instancia ya creada)
+  let db
+  try {
+    const firebaseAdmin = initializeFirebaseAdmin()
+    db = firebaseAdmin.db
+  } catch (initError) {
+    const initErrorMessage = initError instanceof Error ? initError.message : "Error desconocido"
+    console.error(`[USER-PREFERENCES] Error al inicializar Firebase Admin en saveUserPreferences:`, initErrorMessage)
+    console.error(`[USER-PREFERENCES] Error de inicialización completo:`, JSON.stringify({
+      level: "error",
+      service: "controlrepo-backend",
+      component: "user-preferences-storage",
+      operation: "saveUserPreferences",
+      step: "initializeFirebaseAdmin",
+      userId: preferences.userId,
+      errorType: initError instanceof Error ? initError.constructor.name : typeof initError,
+      errorMessage: initErrorMessage,
+      errorStack: initError instanceof Error ? initError.stack : undefined,
+      timestamp: new Date().toISOString(),
+    }))
+    throw new Error(`Error al inicializar Firebase Admin: ${initErrorMessage}`)
+  }
 
   try {
     const docPath = `apps/controlrepo/users/${preferences.userId}/preferences`
     const docRef = db.doc(docPath)
 
+    console.log(`[USER-PREFERENCES] Guardando preferencias en: ${docPath}`)
     await docRef.set({
       activeRepositoryId: preferences.activeRepositoryId,
       updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true })
+    
+    console.log(`[USER-PREFERENCES] Preferencias guardadas exitosamente para usuario ${preferences.userId}`)
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    const errorCode = (error as any)?.code || "UNKNOWN"
+    const errorDetails = (error as any)?.details || null
+    
     console.error(`[USER-PREFERENCES] Error al guardar preferencias de usuario ${preferences.userId}:`, errorMessage)
     console.error(`[USER-PREFERENCES] Error completo:`, JSON.stringify({
       level: "error",
       service: "controlrepo-backend",
       component: "user-preferences-storage",
       operation: "saveUserPreferences",
+      step: "setDocument",
       userId: preferences.userId,
+      errorCode,
+      errorDetails,
       errorType: error instanceof Error ? error.constructor.name : typeof error,
       errorMessage,
+      errorStack: error instanceof Error ? error.stack : undefined,
       timestamp: new Date().toISOString(),
     }))
     

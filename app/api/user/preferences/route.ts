@@ -58,11 +58,49 @@ export async function GET(request: NextRequest) {
  * Actualiza las preferencias del usuario autenticado
  */
 export async function POST(request: NextRequest) {
+  let userId: string | null = null
+  
   try {
     // Obtener userId del token autenticado
-    const userId = await getAuthenticatedUserId(request)
+    try {
+      userId = await getAuthenticatedUserId(request)
+      console.log(`[API] POST /api/user/preferences - Usuario autenticado: ${userId}`)
+    } catch (authError) {
+      const authErrorMessage = authError instanceof Error ? authError.message : "Error desconocido"
+      console.error("[API] Error de autenticación en POST /api/user/preferences:", authErrorMessage)
+      console.error("[API] Error de autenticación completo:", JSON.stringify({
+        level: "error",
+        service: "controlrepo-backend",
+        component: "api-user-preferences",
+        operation: "POST",
+        step: "authentication",
+        errorType: authError instanceof Error ? authError.constructor.name : typeof authError,
+        errorMessage: authErrorMessage,
+        errorStack: authError instanceof Error ? authError.stack : undefined,
+        timestamp: new Date().toISOString(),
+      }))
+      
+      return NextResponse.json(
+        {
+          error: "No autenticado. Token inválido o faltante.",
+          details: authErrorMessage,
+        },
+        { status: 401 }
+      )
+    }
 
-    const body = await request.json()
+    // Parsear body
+    let body: any
+    try {
+      body = await request.json()
+    } catch (parseError) {
+      console.error("[API] Error al parsear body en POST /api/user/preferences:", parseError)
+      return NextResponse.json(
+        { error: "Body inválido. Se espera JSON." },
+        { status: 400 }
+      )
+    }
+
     const { activeRepositoryId } = body
 
     // Validar activeRepositoryId (puede ser null o string)
@@ -73,8 +111,29 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    console.log(`[API] POST /api/user/preferences - Actualizando preferencias para usuario ${userId}, activeRepositoryId: ${activeRepositoryId || "null"}`)
+
     // Actualizar preferencias
-    await updateActiveRepository(userId, activeRepositoryId || null)
+    try {
+      await updateActiveRepository(userId, activeRepositoryId || null)
+      console.log(`[API] POST /api/user/preferences - Preferencias actualizadas exitosamente para usuario ${userId}`)
+    } catch (updateError) {
+      const updateErrorMessage = updateError instanceof Error ? updateError.message : "Error desconocido"
+      console.error(`[API] Error al actualizar preferencias para usuario ${userId}:`, updateErrorMessage)
+      console.error(`[API] Error al actualizar preferencias completo:`, JSON.stringify({
+        level: "error",
+        service: "controlrepo-backend",
+        component: "api-user-preferences",
+        operation: "POST",
+        step: "updatePreferences",
+        userId,
+        errorType: updateError instanceof Error ? updateError.constructor.name : typeof updateError,
+        errorMessage: updateErrorMessage,
+        errorStack: updateError instanceof Error ? updateError.stack : undefined,
+        timestamp: new Date().toISOString(),
+      }))
+      throw updateError
+    }
 
     return NextResponse.json(
       {
@@ -86,14 +145,21 @@ export async function POST(request: NextRequest) {
     )
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    const errorCode = (error as any)?.code || "UNKNOWN"
+    const errorDetails = (error as any)?.details || null
+    
     console.error("[API] Error en POST /api/user/preferences:", errorMessage)
     console.error("[API] Error completo:", JSON.stringify({
       level: "error",
       service: "controlrepo-backend",
       component: "api-user-preferences",
       operation: "POST",
+      userId: userId || "UNKNOWN",
+      errorCode,
+      errorDetails,
       errorType: error instanceof Error ? error.constructor.name : typeof error,
       errorMessage,
+      errorStack: error instanceof Error ? error.stack : undefined,
       timestamp: new Date().toISOString(),
     }))
     

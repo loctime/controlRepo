@@ -140,6 +140,14 @@ export function initializeFirebaseAdmin(): { auth: Auth; db: Firestore } {
     }
 
     console.log(`[AUTH] Inicializando Firebase Admin con projectId: ${projectId} (SOLO DESARROLLO)`)
+    // [FIREBASE ENV CHECK]
+    const envCheckKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY
+    console.log("[FIREBASE ENV CHECK]", {
+      exists: !!envCheckKey,
+      type: typeof envCheckKey,
+      previewStart: envCheckKey ? envCheckKey.substring(0, 30) : null,
+      previewEnd: envCheckKey && envCheckKey.length > 30 ? envCheckKey.substring(envCheckKey.length - 30) : null,
+    })
     try {
       app = initializeApp({
         projectId,
@@ -161,6 +169,14 @@ export function initializeFirebaseAdmin(): { auth: Auth; db: Firestore } {
     }
   } else if (serviceAccount) {
     console.log("[AUTH] Inicializando Firebase Admin con service account...")
+    // [FIREBASE ENV CHECK]
+    const envCheckKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY
+    console.log("[FIREBASE ENV CHECK]", {
+      exists: !!envCheckKey,
+      type: typeof envCheckKey,
+      previewStart: envCheckKey ? envCheckKey.substring(0, 30) : null,
+      previewEnd: envCheckKey && envCheckKey.length > 30 ? envCheckKey.substring(envCheckKey.length - 30) : null,
+    })
     try {
       app = initializeApp({
         credential: cert(serviceAccount),
@@ -192,6 +208,14 @@ export function initializeFirebaseAdmin(): { auth: Auth; db: Firestore } {
   } else {
     // Usar GOOGLE_APPLICATION_CREDENTIALS
     console.log("[AUTH] Inicializando Firebase Admin con GOOGLE_APPLICATION_CREDENTIALS...")
+    // [FIREBASE ENV CHECK]
+    const envCheckKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY
+    console.log("[FIREBASE ENV CHECK]", {
+      exists: !!envCheckKey,
+      type: typeof envCheckKey,
+      previewStart: envCheckKey ? envCheckKey.substring(0, 30) : null,
+      previewEnd: envCheckKey && envCheckKey.length > 30 ? envCheckKey.substring(envCheckKey.length - 30) : null,
+    })
     try {
       app = initializeApp()
       console.log("[AUTH] ✅ Firebase Admin inicializado con GOOGLE_APPLICATION_CREDENTIALS")
