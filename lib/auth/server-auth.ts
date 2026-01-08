@@ -31,6 +31,18 @@ export function initializeFirebaseAdmin(): { auth: Auth; db: Firestore } {
   const existingApps = getApps()
   if (existingApps.length > 0) {
     console.log(`[AUTH] Firebase Admin ya inicializado en getApps() (${existingApps.length} app(s)), reutilizando`)
+    // Si hay múltiples apps, loguear advertencia
+    if (existingApps.length > 1) {
+      console.warn(`[AUTH] ⚠️ ADVERTENCIA: Se encontraron ${existingApps.length} apps de Firebase Admin. Usando la primera.`)
+      console.warn(JSON.stringify({
+        level: "warn",
+        service: "controlfile-backend",
+        component: "firebase-admin-init",
+        warning: "MULTIPLE_APPS_DETECTED",
+        appCount: existingApps.length,
+        timestamp: new Date().toISOString(),
+      }))
+    }
     app = existingApps[0]
     auth = getAuth(app)
     db = getFirestore(app)

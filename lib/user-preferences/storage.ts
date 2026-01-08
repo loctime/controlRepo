@@ -15,17 +15,18 @@ import { FieldValue } from "firebase-admin/firestore"
  * @throws Error si falla la creación del documento usuario
  */
 async function ensureUserDocumentExists(userId: string): Promise<void> {
-  const { db } = initializeFirebaseAdmin()
-
   const userPath = `apps/controlrepo/users/${userId}`
-  const userRef = db.doc(userPath)
   
   try {
+    const { db } = initializeFirebaseAdmin()
+    const userRef = db.doc(userPath)
+    
     // Verificar si el documento existe
     const userDoc = await userRef.get()
     
     if (userDoc.exists) {
       // Ya existe, operación idempotente completada
+      console.log(`[USER-PREFERENCES] Documento usuario ya existe: ${userPath}`)
       return
     }
     
@@ -39,9 +40,20 @@ async function ensureUserDocumentExists(userId: string): Promise<void> {
     }, { merge: true })
     
     console.log(`[USER-PREFERENCES] Documento usuario creado: ${userPath}`)
+    console.log(JSON.stringify({
+      level: "info",
+      service: "controlrepo-backend",
+      component: "user-preferences-storage",
+      operation: "ensureUserDocumentExists",
+      userId,
+      userPath,
+      action: "document_created",
+      timestamp: new Date().toISOString(),
+    }))
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Error desconocido"
     const errorCode = (error as any)?.code || "UNKNOWN"
+    const errorDetails = (error as any)?.details || null
     
     // Si el error es porque el documento ya existe o fue creado concurrentemente, ignorarlo (idempotente)
     // Firestore puede devolver errores específicos en condiciones de carrera, pero generalmente
@@ -51,6 +63,7 @@ async function ensureUserDocumentExists(userId: string): Promise<void> {
       return
     }
     
+    // Log detallado del error
     console.error(`[USER-PREFERENCES] Error al crear documento usuario ${userId}:`, errorMessage)
     console.error(`[USER-PREFERENCES] Error completo:`, JSON.stringify({
       level: "error",
@@ -60,8 +73,10 @@ async function ensureUserDocumentExists(userId: string): Promise<void> {
       userId,
       userPath,
       errorCode,
+      errorDetails,
       errorType: error instanceof Error ? error.constructor.name : typeof error,
       errorMessage,
+      errorStack: error instanceof Error ? error.stack : undefined,
       timestamp: new Date().toISOString(),
     }))
     
