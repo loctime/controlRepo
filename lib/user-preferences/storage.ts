@@ -7,6 +7,69 @@
 import { initializeFirebaseAdmin } from "@/lib/auth/server-auth"
 import { FieldValue } from "firebase-admin/firestore"
 
+/**
+ * Asegura que el documento base del usuario exista en Firestore
+ * Crea el documento con metadata mínima si no existe (operación idempotente)
+ * 
+ * @param userId - ID del usuario
+ * @throws Error si falla la creación del documento usuario
+ */
+async function ensureUserDocumentExists(userId: string): Promise<void> {
+  const { db } = initializeFirebaseAdmin()
+
+  const userPath = `apps/controlrepo/users/${userId}`
+  const userRef = db.doc(userPath)
+  
+  try {
+    // Verificar si el documento existe
+    const userDoc = await userRef.get()
+    
+    if (userDoc.exists) {
+      // Ya existe, operación idempotente completada
+      return
+    }
+    
+    // Crear documento con metadata mínima y segura
+    // Usar set con merge: true para evitar errores si se crea entre get y set (race condition)
+    await userRef.set({
+      uid: userId,
+      createdAt: FieldValue.serverTimestamp(),
+      initializedBy: "api/user/preferences",
+      appId: "controlrepo",
+    }, { merge: true })
+    
+    console.log(`[USER-PREFERENCES] Documento usuario creado: ${userPath}`)
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    const errorCode = (error as any)?.code || "UNKNOWN"
+    
+    // Si el error es porque el documento ya existe o fue creado concurrentemente, ignorarlo (idempotente)
+    // Firestore puede devolver errores específicos en condiciones de carrera, pero generalmente
+    // el merge: true previene estos errores. Sin embargo, verificamos por si acaso.
+    if (errorCode.includes("already-exists") || errorCode.includes("ALREADY_EXISTS")) {
+      console.log(`[USER-PREFERENCES] Documento usuario ya existe (creado concurrentemente): ${userPath}`)
+      return
+    }
+    
+    console.error(`[USER-PREFERENCES] Error al crear documento usuario ${userId}:`, errorMessage)
+    console.error(`[USER-PREFERENCES] Error completo:`, JSON.stringify({
+      level: "error",
+      service: "controlrepo-backend",
+      component: "user-preferences-storage",
+      operation: "ensureUserDocumentExists",
+      userId,
+      userPath,
+      errorCode,
+      errorType: error instanceof Error ? error.constructor.name : typeof error,
+      errorMessage,
+      timestamp: new Date().toISOString(),
+    }))
+    
+    // Lanzar error explícito para que el caller pueda manejarlo
+    throw new Error(`Error al crear documento base del usuario (${errorCode}): ${errorMessage}`)
+  }
+}
+
 export interface UserPreferences {
   userId: string
   activeRepositoryId: string | null
@@ -46,8 +109,12 @@ export async function getUserPreferences(userId: string): Promise<UserPreference
 
 /**
  * Guarda las preferencias de un usuario en Firestore
+ * Asegura que el documento usuario exista antes de escribir preferencias
  */
 export async function saveUserPreferences(preferences: UserPreferences): Promise<void> {
+  // Asegurar que el documento usuario exista antes de escribir preferencias
+  await ensureUserDocumentExists(preferences.userId)
+
   const { db } = initializeFirebaseAdmin()
 
   try {
@@ -59,8 +126,21 @@ export async function saveUserPreferences(preferences: UserPreferences): Promise
       updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true })
   } catch (error) {
-    console.error(`Error al guardar preferencias de usuario ${preferences.userId}:`, error)
-    throw error
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    console.error(`[USER-PREFERENCES] Error al guardar preferencias de usuario ${preferences.userId}:`, errorMessage)
+    console.error(`[USER-PREFERENCES] Error completo:`, JSON.stringify({
+      level: "error",
+      service: "controlrepo-backend",
+      component: "user-preferences-storage",
+      operation: "saveUserPreferences",
+      userId: preferences.userId,
+      errorType: error instanceof Error ? error.constructor.name : typeof error,
+      errorMessage,
+      timestamp: new Date().toISOString(),
+    }))
+    
+    // Lanzar error explícito
+    throw new Error(`Error al guardar preferencias: ${errorMessage}`)
   }
 }
 

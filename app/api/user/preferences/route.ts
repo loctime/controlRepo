@@ -85,13 +85,24 @@ export async function POST(request: NextRequest) {
       { status: 200 }
     )
   } catch (error) {
-    console.error("Error en POST /api/user/preferences:", error)
+    const errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    console.error("[API] Error en POST /api/user/preferences:", errorMessage)
+    console.error("[API] Error completo:", JSON.stringify({
+      level: "error",
+      service: "controlrepo-backend",
+      component: "api-user-preferences",
+      operation: "POST",
+      errorType: error instanceof Error ? error.constructor.name : typeof error,
+      errorMessage,
+      timestamp: new Date().toISOString(),
+    }))
     
     // Si es un error de autenticación, retornar 401
     if (error instanceof Error && (
       error.message.includes("Authorization") ||
       error.message.includes("Token inválido") ||
-      error.message.includes("token")
+      error.message.includes("token") ||
+      error.message.includes("autenticado")
     )) {
       return NextResponse.json(
         {
@@ -101,9 +112,33 @@ export async function POST(request: NextRequest) {
       )
     }
     
+    // Si es un error relacionado con la creación del documento usuario, devolver error controlado
+    if (error instanceof Error && error.message.includes("Error al crear documento base del usuario")) {
+      return NextResponse.json(
+        {
+          error: "Error al inicializar usuario. Por favor, intente nuevamente.",
+          details: errorMessage,
+        },
+        { status: 500 }
+      )
+    }
+    
+    // Si es un error relacionado con guardar preferencias, devolver error controlado
+    if (error instanceof Error && error.message.includes("Error al guardar preferencias")) {
+      return NextResponse.json(
+        {
+          error: "Error al guardar preferencias. Por favor, intente nuevamente.",
+          details: errorMessage,
+        },
+        { status: 500 }
+      )
+    }
+    
+    // Error genérico
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Error desconocido",
+        error: "Error al procesar la solicitud.",
+        details: errorMessage,
       },
       { status: 500 }
     )
