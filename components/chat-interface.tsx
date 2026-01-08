@@ -58,8 +58,10 @@ export function ChatInterface() {
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
 
-  const { repositoryId, preferencesLoaded, status } = useRepository()
+  const { repositoryId, preferencesLoaded, status, error } = useRepository()
   const { setContextFiles } = useContextFiles()
+
+  const canChat = status === "ready"
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -173,7 +175,7 @@ export function ChatInterface() {
    * Enviar pregunta
    * ------------------------------------------- */
   const handleSend = async () => {
-    if (!input.trim() || loading) return
+    if (!input.trim() || loading || !canChat) return
 
     if (!repositoryId) {
       setMessages((prev) => [
@@ -182,27 +184,6 @@ export function ChatInterface() {
           role: "assistant",
           content:
             "No hay un repositorio seleccionado o indexado. Seleccioná uno primero.",
-        },
-      ])
-      return
-    }
-
-    // Validar que el repositorio esté listo según contrato
-    if (status !== "ready") {
-      let message = "El repositorio no está listo."
-      if (status === "indexing") {
-        message = "El repositorio se está indexando. Por favor, esperá a que termine la indexación."
-      } else if (status === "idle") {
-        message = "El repositorio no está indexado. Por favor, indexalo primero."
-      } else if (status === "error") {
-        message = "Hay un error con el repositorio. Por favor, intentá nuevamente."
-      }
-      
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: message,
         },
       ])
       return
@@ -385,6 +366,13 @@ export function ChatInterface() {
       </ScrollArea>
 
       <div className="border-t px-3 py-2">
+        {!canChat && (
+          <div className="mb-2 text-sm text-muted-foreground">
+            {status === "indexing" && "Indexando repositorio…"}
+            {status === "idle" && "Repositorio no indexado"}
+            {status === "error" && (error || "Error en el repositorio")}
+          </div>
+        )}
         <form
           onSubmit={(e) => {
             e.preventDefault()
@@ -398,7 +386,7 @@ export function ChatInterface() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Pregunta sobre el repositorio…"
-            disabled={loading}
+            disabled={loading || !canChat}
             rows={1}
             className="resize-none"
           />
@@ -413,7 +401,7 @@ export function ChatInterface() {
               <X className="h-4 w-4" />
             </Button>
           ) : (
-            <Button type="submit" size="icon" disabled={!input.trim()}>
+            <Button type="submit" size="icon" disabled={!input.trim() || !canChat}>
               <Send className="h-4 w-4" />
             </Button>
           )}
