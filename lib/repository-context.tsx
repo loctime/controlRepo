@@ -44,20 +44,45 @@ function buildRepositoryId(owner: string, repo: string): string {
 }
 
 /**
- * Parsea repositoryId en formato: github:owner:repo
+ * Parsea repositoryId en formato: github:owner:repo o owner/repo (legacy)
+ * Retorna null si el formato no es válido (sin lanzar errores)
  */
 function parseRepositoryIdFromPrefs(repositoryId: string): { owner: string; repo: string } | null {
-  if (!repositoryId.startsWith("github:")) {
-    // Compatibilidad con formato antiguo: owner/repo
-    const parts = repositoryId.split("/")
+  if (!repositoryId || typeof repositoryId !== "string") {
+    return null
+  }
+  
+  const trimmed = repositoryId.trim()
+  if (!trimmed) {
+    return null
+  }
+  
+  // Formato: github:owner:repo
+  if (trimmed.startsWith("github:")) {
+    const parts = trimmed.replace("github:", "").split(":")
     if (parts.length === 2) {
-      return { owner: parts[0], repo: parts[1] }
+      const owner = parts[0].trim()
+      const repo = parts[1].trim()
+      // Validar que owner y repo no estén vacíos
+      if (owner && repo) {
+        return { owner, repo }
+      }
     }
     return null
   }
-  const parts = repositoryId.replace("github:", "").split(":")
-  if (parts.length !== 2) return null
-  return { owner: parts[0], repo: parts[1] }
+  
+  // Formato legacy: owner/repo
+  const parts = trimmed.split("/")
+  if (parts.length === 2) {
+    const owner = parts[0].trim()
+    const repo = parts[1].trim()
+    // Validar que owner y repo no estén vacíos
+    if (owner && repo) {
+      return { owner, repo }
+    }
+  }
+  
+  return null
 }
 
 export function RepositoryProvider({ children }: { children: React.ReactNode }) {
@@ -121,10 +146,22 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
   /**
    * Actualiza las preferencias del usuario con el repositorio activo
+   * Solo acepta repositoryId válidos: github:owner:repo o null
    */
   const updateUserPreferences = useCallback(
     async (activeRepositoryId: string | null) => {
       if (!user?.uid) return
+
+      // Validar que activeRepositoryId sea válido si no es null
+      if (activeRepositoryId !== null) {
+        const parsed = parseRepositoryIdFromPrefs(activeRepositoryId)
+        if (!parsed) {
+          console.warn(
+            `[updateUserPreferences] Rechazado repositoryId inválido: "${activeRepositoryId}". No se actualizarán las preferencias.`
+          )
+          return
+        }
+      }
 
       try {
         // Obtener token de autenticación
@@ -188,15 +225,12 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
             `/api/repository/status/${repositoryId}`
           )
 
-          // Manejar 404 como "not_found" en lugar de error
-          if (response.status === 404) {
+          // Manejar 400/404 como estado final: asumir que no existe índice
+          if (response.status === 400 || response.status === 404) {
             setCurrentIndex(null)
             setCurrentMetrics(null)
             setStatus("idle")
-            // No detener polling si está indexando (puede ser que aún no exista el índice)
-            if (status !== "indexing") {
-              stopPolling()
-            }
+            stopPolling()
             return
           }
 
@@ -404,6 +438,16 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
           `/api/repository/status/${repositoryId}`
         )
 
+        // Manejar 400/404 como estado final: no existe índice
+        if (response.status === 400 || response.status === 404) {
+          setCurrentIndex(null)
+          setCurrentMetrics(null)
+          setStatus("idle")
+          // Limpiar preferencias si el repositorio no existe
+          await updateUserPreferences(null)
+          return
+        }
+
         if (!response.ok) {
           throw new Error(`Error al obtener estado: ${response.statusText}`)
         }
@@ -441,7 +485,8 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         } else if (statusResponse.status === "completed") {
           setStatus("completed")
           // Actualizar preferencias cuando se restaura un repositorio completado
-          await updateUserPreferences(repositoryId)
+          // Usar normalizedRepoId que ya está normalizado al formato correcto
+          await updateUserPreferences(normalizedRepoId)
           // Cargar métricas cuando el índice está completado (usar owner/repo que ya tenemos)
           await loadMetrics(owner, repo, branch)
         } else if (statusResponse.status === "not_found") {
@@ -506,6 +551,11 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
             // Restaurar el repositorio usando refreshStatus
             // Esto cargará el índice completo si existe
             await refreshStatus(parsed.owner, parsed.repo)
+          } else {
+            // Formato inválido: loguear warning y salir silenciosamente
+            console.warn(
+              `[restoreActiveRepository] Formato inválido de activeRepositoryId: "${preferences.activeRepositoryId}". Se omite la restauración.`
+            )
           }
         }
       } catch (err) {

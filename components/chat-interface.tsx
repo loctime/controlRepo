@@ -19,11 +19,31 @@ interface Message {
 
 /* -------------------------------------------
  * Helper: parse repositoryId
+ * Parsea formato: github:owner:repo
  * ------------------------------------------- */
-function parseRepositoryId(repositoryId: string) {
-  const [fullRepo, branch = "main"] = repositoryId.split("#")
-  const [owner, repo] = fullRepo.split("/")
-  return { owner, repo, branch }
+function parseRepositoryId(repositoryId: string): { owner: string; repo: string } | null {
+  if (!repositoryId || typeof repositoryId !== "string") {
+    return null
+  }
+  
+  const trimmed = repositoryId.trim()
+  if (!trimmed) {
+    return null
+  }
+  
+  // Formato: github:owner:repo
+  if (trimmed.startsWith("github:")) {
+    const parts = trimmed.replace("github:", "").split(":")
+    if (parts.length === 2) {
+      const owner = parts[0].trim()
+      const repo = parts[1].trim()
+      if (owner && repo) {
+        return { owner, repo }
+      }
+    }
+  }
+  
+  return null
 }
 
 export function ChatInterface() {
@@ -62,10 +82,15 @@ export function ChatInterface() {
 
     const loadRepositorySummary = async () => {
       try {
-        const { owner, repo, branch } = parseRepositoryId(repositoryId)
+        const parsed = parseRepositoryId(repositoryId)
+        if (!parsed) {
+          console.warn(`[ChatInterface] Formato inválido de repositoryId: "${repositoryId}"`)
+          return
+        }
 
+        // Usar endpoint con path params: /api/repository/status/:repositoryId
         const res = await fetch(
-          `/api/repository/status?owner=${owner}&repo=${repo}&branch=${branch}`
+          `/api/repository/status/${repositoryId}`
         )
 
         if (!res.ok) return
