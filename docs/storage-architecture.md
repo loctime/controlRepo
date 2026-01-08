@@ -44,7 +44,7 @@ El sistema utiliza una arquitectura distribuida donde:
 ### Preferencias de Usuario
 
 **Ubicación**: Firestore
-- **Namespace**: `/apps/controlrepo/{userId}/preferences`
+- **Namespace**: `/apps/controlrepo/users/{userId}/preferences/default`
 - **Contenido**: `activeRepositoryId`, `updatedAt`
 - **Acceso**: Directo desde Vercel usando Firebase Admin SDK
 
