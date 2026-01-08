@@ -17,11 +17,12 @@ export function createRepositoryId(
 /**
  * Normaliza un repositoryId para usar como nombre de archivo
  * Ej: loctime/controlauditv2/main → loctime_controlauditv2_main
+ * Ej: github:owner:repo → github_owner_repo
  */
 export function normalizeRepositoryIdForFile(
   repositoryId: string
 ): string {
-  return repositoryId.replace(/\//g, "_")
+  return repositoryId.replace(/\//g, "_").replace(/:/g, "_")
 }
 
 /**

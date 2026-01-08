@@ -1,5 +1,5 @@
 import { getRepositoryIndex } from "@/lib/repository/storage"
-import { IndexedFile } from "@/lib/types/repository"
+import { IndexedFile, RepositoryIndex } from "@/lib/types/repository"
 
 interface Options {
   maxFiles: number
@@ -9,15 +9,22 @@ export async function selectFilesFromIndex(
   repositoryId: string,
   analysis: any,
   jsonContext: any,
-  options: Options
+  options: Options,
+  index?: RepositoryIndex | null
 ): Promise<IndexedFile[]> {
-  const index = await getRepositoryIndex(repositoryId)
+  // Si el índice se pasa como parámetro, usarlo directamente (preferido)
+  // Si no, intentar cargarlo desde el filesystem (fallback para compatibilidad)
+  let repositoryIndex = index
+  
+  if (!repositoryIndex) {
+    repositoryIndex = await getRepositoryIndex(repositoryId)
+  }
 
-  if (!index) {
+  if (!repositoryIndex) {
     throw new Error(`RepositoryIndex no encontrado para ${repositoryId}`)
   }
 
-  if (!Array.isArray(index.files)) {
+  if (!Array.isArray(repositoryIndex.files)) {
     throw new Error(`RepositoryIndex inválido: files no existe`)
   }
 
@@ -33,7 +40,7 @@ export async function selectFilesFromIndex(
     return []
   }
 
-  const scored = index.files.map(file => {
+  const scored = repositoryIndex.files.map(file => {
     let score = 0
 
     const haystack = [

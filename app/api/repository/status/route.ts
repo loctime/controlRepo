@@ -164,6 +164,7 @@ export async function GET(request: NextRequest) {
       const { index, branch } = localIndex
       
       // Devolver respuesta con formato esperado por el frontend
+      // Incluir el índice completo para que el frontend pueda usarlo
       return NextResponse.json({
         status: "completed",
         repositoryId: `github:${owner}:${repo}`,
@@ -177,6 +178,8 @@ export async function GET(request: NextRequest) {
           totalLines: index.summary?.totalLines || 0,
           languages: index.summary?.languages || {},
         },
+        // Incluir el índice completo para el frontend
+        index: index.status === "completed" ? index : undefined,
       }, { status: 200 })
     }
 

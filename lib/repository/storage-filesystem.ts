@@ -9,7 +9,7 @@
  */
 
 import { RepositoryIndex, IndexLock } from "@/lib/types/repository"
-import { writeFile, readFile, mkdir, unlink, rename, stat } from "fs/promises"
+import { writeFile, readFile, mkdir, unlink, rename, stat, readdir } from "fs/promises"
 import { join } from "path"
 import { RepositoryStorage } from "./storage"
 import { normalizeRepositoryIdForFile } from "./utils"
@@ -61,17 +61,78 @@ class FilesystemRepositoryStorage implements RepositoryStorage {
 
   /**
    * Obtiene un índice de repositorio
+   * Busca en múltiples formatos para compatibilidad:
+   * 1. Formato backend: github:owner:repo -> github_owner_repo.json
+   * 2. Formato local: owner/repo/branch -> owner_repo_branch.json
    */
   async getRepositoryIndex(repositoryId: string): Promise<RepositoryIndex | null> {
     await ensureDirs()
-    const filePath = join(STORAGE_DIR, `${normalizeRepositoryIdForFile(repositoryId)}.json`)
-
+    
+    // PASO 1: Intentar con el formato exacto del repositoryId (normalizado)
     try {
+      const normalized = normalizeRepositoryIdForFile(repositoryId)
+      const filePath = join(STORAGE_DIR, `${normalized}.json`)
       const content = await readFile(filePath, "utf-8")
-      return JSON.parse(content) as RepositoryIndex
-    } catch (error) {
-      return null
+      const index = JSON.parse(content) as RepositoryIndex
+      if (index && index.id) {
+        return index
+      }
+    } catch (error: any) {
+      // Archivo no existe o error de lectura, continuar
+      if (error?.code !== "ENOENT") {
+        console.log(`[getRepositoryIndex] Error al leer índice en formato directo: ${error instanceof Error ? error.message : "Error desconocido"}`)
+      }
     }
+    
+    // PASO 2: Si es formato github:owner:repo, parsear y buscar formatos alternativos
+    if (repositoryId.startsWith("github:")) {
+      const parts = repositoryId.replace("github:", "").split(":")
+      if (parts.length === 2) {
+        const [owner, repo] = parts
+        
+        // Intentar formato backend: github_owner_repo.json
+        try {
+          const backendFormat = normalizeRepositoryIdForFile(repositoryId)
+          const filePath = join(STORAGE_DIR, `${backendFormat}.json`)
+          const content = await readFile(filePath, "utf-8")
+          const index = JSON.parse(content) as RepositoryIndex
+          if (index && index.id) {
+            return index
+          }
+        } catch (error: any) {
+          if (error?.code !== "ENOENT") {
+            console.log(`[getRepositoryIndex] Error al leer índice en formato backend: ${error instanceof Error ? error.message : "Error desconocido"}`)
+          }
+        }
+        
+        // Intentar buscar archivos que coincidan con el patrón owner_repo_*
+        try {
+          const prefix = normalizeRepositoryIdForFile(`${owner}/${repo}/`)
+          const files = await readdir(STORAGE_DIR)
+          const matchingFiles = files.filter(file => 
+            file.startsWith(prefix) && file.endsWith(".json")
+          )
+          
+          // Intentar leer el primer archivo que coincida
+          for (const file of matchingFiles) {
+            try {
+              const filePath = join(STORAGE_DIR, file)
+              const content = await readFile(filePath, "utf-8")
+              const index = JSON.parse(content) as RepositoryIndex
+              if (index && index.id) {
+                return index
+              }
+            } catch (error) {
+              continue
+            }
+          }
+        } catch (error) {
+          // Si hay error al leer el directorio, continuar
+        }
+      }
+    }
+    
+    return null
   }
 
   /**

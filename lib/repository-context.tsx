@@ -284,6 +284,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
             repo?: string
             stats?: { totalFiles?: number }
             indexedAt?: string
+            index?: RepositoryIndex
           }
           
           // Normalizar repositoryId al formato github:owner:repo
@@ -308,6 +309,11 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
             const wasIndexing = status === "indexing"
             
             setStatus("completed")
+            
+            // Cargar el índice completo si está disponible en la respuesta
+            if (statusResponse.index && statusResponse.index.status === "completed") {
+              setCurrentIndex(statusResponse.index)
+            }
             
             // Mostrar notificación cuando se completa la indexación
             if (wasIndexing) {
@@ -554,8 +560,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
         const data = await response.json()
 
-        // El endpoint /status solo devuelve metadata (status, repositoryId, stats, owner, repo, indexedAt)
-        // NO devuelve files - currentIndex solo se setea cuando hay un índice completo real
+        // El endpoint /status puede devolver el índice completo cuando está disponible
         const statusResponse = data as { 
           repositoryId: string
           status: string
@@ -563,6 +568,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
           repo?: string
           stats?: { totalFiles?: number }
           indexedAt?: string
+          index?: RepositoryIndex
         }
         
         // Normalizar repositoryId al formato github:owner:repo
@@ -595,6 +601,10 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
           }
         } else if (statusResponse.status === "completed") {
           setStatus("completed")
+          // Cargar el índice completo si está disponible en la respuesta
+          if (statusResponse.index && statusResponse.index.status === "completed") {
+            setCurrentIndex(statusResponse.index)
+          }
           // Actualizar preferencias cuando se restaura un repositorio completado
           // Usar normalizedRepoId que ya está normalizado al formato correcto
           await updateUserPreferences(normalizedRepoId)

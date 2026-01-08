@@ -57,7 +57,7 @@ export function ChatInterface() {
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
 
-  const { repositoryId, preferencesLoaded } = useRepository()
+  const { repositoryId, preferencesLoaded, currentIndex } = useRepository()
   const { setContextFiles } = useContextFiles()
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -199,6 +199,19 @@ export function ChatInterface() {
       return
     }
 
+    // Validar que el índice esté disponible
+    if (!currentIndex) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content:
+            "Repositorio cargándose. Por favor, esperá a que termine de cargar el índice.",
+        },
+      ])
+      return
+    }
+
     const question = input.trim()
     setInput("")
     setLoading(true)
@@ -212,6 +225,7 @@ export function ChatInterface() {
     const controller = new AbortController()
     abortControllerRef.current = controller
     console.log("repositoryId:", repositoryId)
+    console.log("currentIndex disponible:", !!currentIndex)
 
     try {
       const res = await fetch("/api/chat/query", {
@@ -221,6 +235,7 @@ export function ChatInterface() {
         body: JSON.stringify({
           question,
           repositoryId,
+          index: currentIndex, // Enviar el índice completo desde el contexto
         }),
       })
 
