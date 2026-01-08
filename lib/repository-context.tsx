@@ -249,7 +249,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
           }
 
           const response = await fetch(
-            `/api/repository/status/${repositoryId}`
+            `/api/repository/status?repositoryId=${encodeURIComponent(repositoryId)}`
           )
 
           // Manejar 400/404 como estado final: asumir que no existe índice
@@ -527,7 +527,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         }
 
         const response = await fetch(
-          `/api/repository/status/${repositoryId}`
+          `/api/repository/status?repositoryId=${encodeURIComponent(repositoryId)}`
         )
 
         // Manejar 400/404 como estado final: no existe índice

@@ -114,9 +114,9 @@ export function ChatInterface() {
           return
         }
 
-        // Usar endpoint con path params: /api/repository/status/:repositoryId
+        // Usar endpoint con query params: /api/repository/status?repositoryId=...
         const res = await fetch(
-          `/api/repository/status/${repositoryId}`
+          `/api/repository/status?repositoryId=${encodeURIComponent(repositoryId)}`
         )
 
         if (!res.ok) return

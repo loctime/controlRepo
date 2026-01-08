@@ -1,3 +1,4 @@
+// app/api/repository/status/route.ts
 import { NextRequest, NextResponse } from "next/server"
 import { getRepositoryIndex } from "@/lib/repository/storage-filesystem"
 import { normalizeRepositoryIdForFile } from "@/lib/repository/utils"
@@ -112,7 +113,7 @@ async function findIndexInFilesystem(repositoryId: string, owner: string, repo: 
 }
 
 /**
- * GET /api/repository/status/:repositoryId
+ * GET /api/repository/status?repositoryId=...
  * 
  * Comportamiento:
  * 1. Primero verifica si existe el índice en filesystem local
@@ -120,19 +121,24 @@ async function findIndexInFilesystem(repositoryId: string, owner: string, repo: 
  * 3. Si no existe, hace proxy al backend de Render
  * 4. Solo devuelve 400/404 si no existe en ningún lado
  * 
- * @param repositoryId - Formato: github:owner:repo
+ * @param repositoryId - Formato: github:owner:repo (query param)
  */
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { repositoryId: string } }
-) {
-  console.log(`[STATUS] GET /api/repository/status/${params.repositoryId} - Endpoint llamado`)
+export async function GET(request: NextRequest) {
+  const repositoryId = request.nextUrl.searchParams.get("repositoryId")
+  
+  console.log(`[STATUS] GET /api/repository/status?repositoryId=${repositoryId} - Endpoint llamado`)
   
   try {
-    const repositoryId = params.repositoryId
+    // Validar que repositoryId exista
+    if (!repositoryId) {
+      return NextResponse.json(
+        { error: "repositoryId es requerido como query parameter" },
+        { status: 400 }
+      )
+    }
     
     // Validar formato de repositoryId
-    if (!repositoryId || !repositoryId.startsWith("github:")) {
+    if (!repositoryId.startsWith("github:")) {
       return NextResponse.json(
         { error: "repositoryId debe tener formato: github:owner:repo" },
         { status: 400 }
@@ -215,7 +221,7 @@ export async function GET(
       )
     }
   } catch (error) {
-    console.error("Error en GET /api/repository/status/:repositoryId:", error)
+    console.error("Error en GET /api/repository/status:", error)
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Error desconocido",
