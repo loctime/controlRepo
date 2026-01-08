@@ -84,20 +84,11 @@ export function HeaderRepository() {
   /* =======================
      Handlers
   ======================= */
-  const handleBranchChange = async (branch: string) => {
-    if (!repositoryInfo || branch === repositoryInfo.branch) return
-    await indexRepository(repositoryInfo.owner!, repositoryInfo.repo!, branch)
-  }
-
   const handleReindex = async () => {
-    if (!repositoryInfo || reindexing) return
+    if (!repositoryId || reindexing) return
     setReindexing(true)
     try {
-      await indexRepository(
-        repositoryInfo.owner!,
-        repositoryInfo.repo!,
-        repositoryInfo.branch || "main"
-      )
+      await indexRepository(repositoryId, true) // force = true
     } finally {
       setReindexing(false)
     }
@@ -109,12 +100,12 @@ export function HeaderRepository() {
     branch: string
   }) => {
     // Construir repositoryId según contrato: github:owner:repo
-    const repositoryId = `github:${repo.owner}:${repo.repo}`
-    await indexRepository(repositoryId)
+    const repoId = `github:${repo.owner}:${repo.repo}`
+    await indexRepository(repoId)
   }
 
-  const repositoryDisplay = repositoryInfo
-    ? `${repositoryInfo.owner}/${repositoryInfo.repo}${repositoryInfo.branch ? `@${repositoryInfo.branch}` : ""}`
+  const repositoryDisplay = parsedRepo
+    ? `${parsedRepo.owner}/${parsedRepo.repo}`
     : repositoryId || "Sin repositorio"
 
   /* =======================
