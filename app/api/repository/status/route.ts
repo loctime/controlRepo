@@ -27,6 +27,22 @@ function parseRepositoryId(repositoryId: string): { owner: string; repo: string 
 }
 
 /**
+ * Normaliza languages para que siempre sea un array de strings
+ * - Si es array → usarlo
+ * - Si es objeto (mapa) → Object.keys(languages)
+ * - Si no existe → []
+ */
+function normalizeLanguages(languages: any): string[] {
+  if (Array.isArray(languages)) {
+    return languages
+  }
+  if (languages && typeof languages === "object") {
+    return Object.keys(languages)
+  }
+  return []
+}
+
+/**
  * Busca un índice en el filesystem local
  * El backend de Render guarda con formato: github:owner:repo.json
  * Pero el código local usa formato: owner/repo/branch.json (normalizado a owner_repo_branch.json)
@@ -177,7 +193,7 @@ export async function GET(request: NextRequest) {
         stats: {
           totalFiles: index.summary?.totalFiles || index.files?.length || 0,
           totalLines: index.summary?.totalLines || 0,
-          languages: index.summary?.languages || {},
+          languages: normalizeLanguages(index.summary?.languages),
         },
         // Incluir el índice completo para el frontend
         index: index.status === "completed" ? index : undefined,
@@ -210,7 +226,16 @@ export async function GET(request: NextRequest) {
       const responseData = await backendResponse.json()
       console.log(`[STATUS] Respuesta del backend: ${backendResponse.status}`)
 
-      // Retornar respuesta del backend
+      // Normalizar languages en la respuesta del backend
+      // El frontend NO debe manejar formatos variables - la normalización es responsabilidad del proxy
+      if (responseData.stats) {
+        responseData.stats = {
+          ...responseData.stats,
+          languages: normalizeLanguages(responseData.stats.languages),
+        }
+      }
+
+      // Retornar respuesta del backend (con languages normalizado)
       return NextResponse.json(responseData, {
         status: backendResponse.status,
       })

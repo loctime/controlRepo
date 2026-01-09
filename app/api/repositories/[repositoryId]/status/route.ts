@@ -5,6 +5,22 @@
  */
 import { NextRequest, NextResponse } from "next/server"
 
+/**
+ * Normaliza languages para que siempre sea un array de strings
+ * - Si es array → usarlo
+ * - Si es objeto (mapa) → Object.keys(languages)
+ * - Si no existe → []
+ */
+function normalizeLanguages(languages: any): string[] {
+  if (Array.isArray(languages)) {
+    return languages
+  }
+  if (languages && typeof languages === "object") {
+    return Object.keys(languages)
+  }
+  return []
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { repositoryId: string } }
@@ -44,19 +60,16 @@ export async function GET(
     }
 
     // No mapear status - aceptar "completed" directamente
+    // Normalizar languages siempre - el frontend NO debe manejar formatos variables
     const transformedData = {
       ...data,
       status: data.status, // Mantener el status tal como viene del backend
-      // Asegurar que stats tenga el formato correcto
+      // Asegurar que stats tenga el formato correcto con languages normalizado
       stats: data.stats
         ? {
             totalFiles: data.stats.totalFiles || 0,
             totalSize: data.stats.totalSize || 0,
-            languages: Array.isArray(data.stats.languages)
-              ? data.stats.languages
-              : data.stats.languages
-              ? Object.keys(data.stats.languages)
-              : [],
+            languages: normalizeLanguages(data.stats.languages),
           }
         : undefined,
     }
