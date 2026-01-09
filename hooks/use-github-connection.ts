@@ -23,6 +23,7 @@ export interface GitHubConnectionHook {
   error: string | null
   checkStatus: () => Promise<void>
   connect: () => Promise<void>
+  disconnect: () => Promise<void>
   isChecking: boolean
 }
 
@@ -184,11 +185,89 @@ export function useGitHubConnection(): GitHubConnectionHook {
 
       console.log("[GitHub] Iniciando flujo OAuth...")
 
-      // Pasar el token como query parameter para el flujo OAuth
-      window.location.href =
-        `${process.env.NEXT_PUBLIC_CONTROLFILE_URL}/api/auth/github?token=${encodeURIComponent(token)}`
+      // Agregar timeout de 10 segundos
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000)
+
+      let res: Response
+      try {
+        res = await fetch(
+          `${process.env.NEXT_PUBLIC_CONTROLFILE_URL}/api/auth/github/init`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            signal: controller.signal,
+          }
+        )
+        clearTimeout(timeoutId)
+      } catch (fetchError) {
+        clearTimeout(timeoutId)
+        if (fetchError instanceof Error && fetchError.name === "AbortError") {
+          throw new Error("Timeout: La inicialización de OAuth tardó más de 10 segundos")
+        }
+        throw fetchError
+      }
+
+      console.log("[GitHub] Respuesta del backend al inicializar OAuth:", {
+        status: res.status,
+        ok: res.ok,
+      })
+
+      if (!res.ok) {
+        // Intentar parsear error, pero manejar respuestas no-JSON
+        let errorData: any = {}
+        try {
+          const text = await res.text()
+          if (text) {
+            errorData = JSON.parse(text)
+          }
+        } catch {
+          // Respuesta no es JSON, usar statusText
+        }
+        
+        const errorMessage = errorData.error || `Error ${res.status}: ${res.statusText || "Error desconocido"}`
+        
+        console.error("[GitHub] Error al inicializar OAuth:", {
+          status: res.status,
+          statusText: res.statusText,
+          error: errorMessage,
+          timestamp: new Date().toISOString(),
+        })
+
+        setState("error")
+        setError(errorMessage)
+        return
+      }
+
+      // Parsear respuesta JSON con protección
+      let data: any = {}
+      try {
+        const text = await res.text()
+        if (text) {
+          data = JSON.parse(text)
+        }
+      } catch (parseError) {
+        console.error("[GitHub] Error al parsear respuesta JSON:", {
+          error: parseError,
+          responseText: await res.text().catch(() => ""),
+        })
+        throw new Error("Respuesta inválida del servidor")
+      }
+
+      const githubAuthUrl = data.githubAuthUrl
+
+      if (!githubAuthUrl || typeof githubAuthUrl !== "string") {
+        throw new Error("La respuesta del servidor no contiene githubAuthUrl válido")
+      }
+
+      console.log("[GitHub] Redirigiendo a GitHub OAuth...")
+      
+      // Redirigir a la URL de autorización de GitHub
+      window.location.href = githubAuthUrl
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Error al obtener token para GitHub OAuth"
+      const errorMessage = err instanceof Error ? err.message : "Error desconocido al conectar con GitHub"
       
       console.error("[GitHub] Error al conectar:", {
         error: errorMessage,
@@ -197,6 +276,108 @@ export function useGitHubConnection(): GitHubConnectionHook {
 
       setState("error")
       setError(errorMessage)
+    }
+  }, [])
+
+  /**
+   * Desconecta la cuenta de GitHub
+   * Limpia el estado local y fuerza githubState = not_connected
+   */
+  const disconnect = useCallback(async () => {
+    try {
+      setError(null)
+      setIsChecking(true)
+      setState("connecting")
+
+      const auth = getAuth()
+      const user = auth.currentUser
+
+      if (!user) {
+        const errorMessage = "Usuario no autenticado"
+        console.error("[GitHub] Error al desconectar:", errorMessage)
+        setState("error")
+        setError(errorMessage)
+        setIsChecking(false)
+        return
+      }
+
+      const token = await user.getIdToken()
+
+      console.log("[GitHub] Desconectando GitHub...")
+
+      // Agregar timeout de 10 segundos
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 10000)
+
+      let res: Response
+      try {
+        res = await fetch(
+          `${process.env.NEXT_PUBLIC_CONTROLFILE_URL}/api/github/disconnect`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            signal: controller.signal,
+          }
+        )
+        clearTimeout(timeoutId)
+      } catch (fetchError) {
+        clearTimeout(timeoutId)
+        if (fetchError instanceof Error && fetchError.name === "AbortError") {
+          throw new Error("Timeout: La desconexión de GitHub tardó más de 10 segundos")
+        }
+        throw fetchError
+      }
+
+      console.log("[GitHub] Respuesta del backend al desconectar:", {
+        status: res.status,
+        ok: res.ok,
+      })
+
+      if (!res.ok) {
+        // Intentar parsear error, pero manejar respuestas no-JSON
+        let errorData: any = {}
+        try {
+          const text = await res.text()
+          if (text) {
+            errorData = JSON.parse(text)
+          }
+        } catch {
+          // Respuesta no es JSON, usar statusText
+        }
+        
+        const errorMessage = errorData.error || `Error ${res.status}: ${res.statusText || "Error desconocido"}`
+        
+        console.error("[GitHub] Error al desconectar:", {
+          status: res.status,
+          statusText: res.statusText,
+          error: errorMessage,
+          timestamp: new Date().toISOString(),
+        })
+
+        setState("error")
+        setError(errorMessage)
+        setIsChecking(false)
+        return
+      }
+
+      // Desconexión exitosa: limpiar estado local y forzar not_connected
+      console.log("[GitHub] Desconexión exitosa, limpiando estado local...")
+      setState("not_connected")
+      setError(null)
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Error desconocido al desconectar GitHub"
+      
+      console.error("[GitHub] Excepción al desconectar:", {
+        error: errorMessage,
+        exception: err,
+      })
+
+      setState("error")
+      setError(errorMessage)
+    } finally {
+      setIsChecking(false)
     }
   }, [])
 
@@ -249,6 +430,7 @@ export function useGitHubConnection(): GitHubConnectionHook {
     error,
     checkStatus,
     connect,
+    disconnect,
     isChecking,
   }
 }

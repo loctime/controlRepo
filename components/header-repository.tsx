@@ -18,6 +18,7 @@ import {
   GitBranch,
   RefreshCw,
   Github,
+  LogOut,
 } from "lucide-react"
 import { useRepository } from "@/lib/repository-context"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -34,7 +35,7 @@ export function HeaderRepository() {
   const [reindexing, setReindexing] = useState(false)
   
   // Usar el nuevo hook con estados explícitos
-  const { state: githubState, error: githubError, checkStatus, connect, isChecking } = useGitHubConnection()
+  const { state: githubState, error: githubError, checkStatus, connect, disconnect, isChecking } = useGitHubConnection()
 
   // Verificar estado de GitHub cuando el componente se monta o cuando cambia la visibilidad
   // Esto asegura que el estado se actualice después del OAuth
@@ -265,15 +266,15 @@ export function HeaderRepository() {
                     : "ghost"
                 }
                 onClick={async () => {
-                  if (githubState === "connected") {
+                  // Cuando connected === false, iniciar OAuth limpio
+                  if (githubState === "not_connected") {
+                    await connect()
+                  } else if (githubState === "connected") {
                     // Si está conectado, permitir reconectar manualmente (fallback)
                     await checkStatus()
                   } else if (githubState === "error") {
                     // Si hay error, reintentar verificación
                     await checkStatus()
-                  } else {
-                    // Si no está conectado, iniciar flujo OAuth
-                    await connect()
                   }
                 }}
                 className="h-6 w-6"
@@ -312,6 +313,32 @@ export function HeaderRepository() {
               )}
             </TooltipContent>
           </Tooltip>
+
+          {/* Botón de Desconectar GitHub - solo cuando está conectado */}
+          {githubState === "connected" && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  onClick={async () => {
+                    await disconnect()
+                  }}
+                  className="h-6 w-6"
+                  disabled={isChecking || githubState === "connecting"}
+                >
+                  {isChecking ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <LogOut className="h-4 w-4" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Desconectar GitHub</p>
+              </TooltipContent>
+            </Tooltip>
+          )}
 
           <Tooltip>
             <TooltipTrigger asChild>
