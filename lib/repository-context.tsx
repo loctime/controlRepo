@@ -159,7 +159,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
       const poll = async () => {
         try {
-          const response = await fetch(`/api/repositories/${encodeURIComponent(repoId)}/status`)
+          const response = await fetch(`/api/repository/status?repositoryId=${encodeURIComponent(repoId)}`)
 
           // Según el contrato: siempre devuelve 200
           if (!response.ok) {
@@ -320,7 +320,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
       try {
         // Según el contrato: siempre devuelve 200
-        const response = await fetch(`/api/repositories/${encodeURIComponent(repoId)}/status`)
+        const response = await fetch(`/api/repository/status?repositoryId=${encodeURIComponent(repoId)}`)
 
         if (!response.ok) {
           throw new Error(`Error al obtener estado: ${response.statusText}`)
