@@ -164,9 +164,10 @@ export async function GET(request: NextRequest) {
       const { index, branch } = localIndex
       
       // Devolver respuesta con formato esperado por el frontend
+      // Según contrato API: status debe ser "ready" cuando está indexado
       // Incluir el índice completo para que el frontend pueda usarlo
       return NextResponse.json({
-        status: "completed",
+        status: "ready",
         repositoryId: `github:${owner}:${repo}`,
         owner,
         repo,

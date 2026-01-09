@@ -169,9 +169,12 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
           const data = (await response.json()) as RepositoryStatusResponse
 
-          // Actualizar estado exactamente como viene del backend
+          // Mapear "completed" a "ready" según el contrato API
+          const normalizedStatus = data.status === "completed" ? "ready" : data.status
+
+          // Actualizar estado exactamente como viene del backend (normalizado)
           setRepositoryId(data.repositoryId)
-          setStatus(data.status)
+          setStatus(normalizedStatus)
           setStatusData({
             indexedAt: data.indexedAt,
             stats: data.stats,
@@ -185,10 +188,10 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
           }
 
           // Detener polling cuando está ready o error
-          if (data.status === "ready" || data.status === "error") {
+          if (normalizedStatus === "ready" || normalizedStatus === "error") {
             stopPolling()
             
-            if (data.status === "ready") {
+            if (normalizedStatus === "ready") {
               // Verificar si acabamos de completar (transición de indexing a ready)
               const wasIndexing = status === "indexing"
               if (wasIndexing) {
@@ -328,9 +331,12 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
         const data = (await response.json()) as RepositoryStatusResponse
 
-        // Actualizar estado exactamente como viene del backend
+        // Mapear "completed" a "ready" según el contrato API
+        const normalizedStatus = data.status === "completed" ? "ready" : data.status
+
+        // Actualizar estado exactamente como viene del backend (normalizado)
         setRepositoryId(data.repositoryId)
-        setStatus(data.status)
+        setStatus(normalizedStatus)
         setStatusData({
           indexedAt: data.indexedAt,
           stats: data.stats,
@@ -343,13 +349,13 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         }
 
         // Si está indexing, iniciar polling (solo si no hay uno activo)
-        if (data.status === "indexing") {
+        if (normalizedStatus === "indexing") {
           if (!pollingRef.current.intervalId) {
             startPolling(data.repositoryId)
           }
-        } else if (data.status === "ready") {
+        } else if (normalizedStatus === "ready") {
           await updateUserPreferences(data.repositoryId)
-        } else if (data.status === "idle") {
+        } else if (normalizedStatus === "idle") {
           await updateUserPreferences(null)
         }
       } catch (err) {
