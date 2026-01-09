@@ -175,6 +175,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
             repositoryId: data.repositoryId,
             error: data.error,
             hasStats: !!data.stats,
+            timestamp: new Date().toISOString(),
           })
 
           // Actualizar estado exactamente como viene del backend (sin normalizar)
@@ -188,13 +189,18 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
           // Si hay error, mostrarlo claramente
           if (data.error) {
             setError(data.error)
-            console.error(`[startPolling] Error del backend para ${repoId}:`, data.error)
+            console.error(`[startPolling] Error del backend para ${repoId}:`, {
+              error: data.error,
+              status: data.status,
+              timestamp: new Date().toISOString(),
+            })
           } else {
             setError(null)
           }
 
           // Detener polling cuando está completed o error
           if (data.status === "completed" || data.status === "error") {
+            console.log(`[startPolling] Deteniendo polling para ${repoId}, status=${data.status}`)
             stopPolling()
             
             if (data.status === "completed") {
@@ -222,7 +228,12 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
           }
           // Si está indexing o idle, continuar polling
         } catch (err) {
-          console.error("Error en polling:", err)
+          const errorMessage = err instanceof Error ? err.message : "Error desconocido"
+          console.error(`[startPolling] Error en polling para ${repoId}:`, {
+            error: errorMessage,
+            exception: err,
+            timestamp: new Date().toISOString(),
+          })
           // No detener polling por errores de red temporales
         }
       }
@@ -289,7 +300,16 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}))
-          throw new Error(errorData.error || `Error al indexar: ${response.statusText}`)
+          const errorMessage = errorData.error || `Error al indexar: ${response.statusText}`
+          
+          console.error(`[indexRepository] Error del backend para ${repoId}:`, {
+            status: response.status,
+            statusText: response.statusText,
+            error: errorMessage,
+            errorData,
+          })
+          
+          throw new Error(errorMessage)
         }
 
         const data = (await response.json()) as IndexRepositoryResponse
@@ -299,6 +319,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
           status: data.status,
           repositoryId: data.repositoryId,
           message: data.message,
+          timestamp: new Date().toISOString(),
         })
 
         // Actualizar estado según respuesta del backend
@@ -315,13 +336,22 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         }
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Error desconocido al indexar"
+        
+        console.error(`[indexRepository] Excepción al indexar ${repoId}:`, {
+          error: errorMessage,
+          exception: err,
+          timestamp: new Date().toISOString(),
+        })
+        
         setError(errorMessage)
         setStatus("error")
-        setRepositoryId(null)
+        // NO resetear repositoryId en error - mantenerlo para permitir reintento
         setStatusData(null)
         stopPolling()
       } finally {
+        // SIEMPRE resetear loading, incluso si hay error
         setLoading(false)
+        console.log(`[indexRepository] Finalizado para ${repoId}, loading=false`)
       }
     },
     [startPolling, stopPolling, updateUserPreferences]
@@ -358,6 +388,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
           repositoryId: data.repositoryId,
           error: data.error,
           hasStats: !!data.stats,
+          timestamp: new Date().toISOString(),
         })
 
         // Actualizar estado exactamente como viene del backend (sin normalizar)
@@ -371,7 +402,11 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         // Si hay error, mostrarlo claramente
         if (data.error) {
           setError(data.error)
-          console.error(`[refreshStatus] Error del backend para ${repoId}:`, data.error)
+          console.error(`[refreshStatus] Error del backend para ${repoId}:`, {
+            error: data.error,
+            status: data.status,
+            timestamp: new Date().toISOString(),
+          })
         } else {
           setError(null)
         }
@@ -396,12 +431,21 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         }
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Error desconocido al refrescar"
+        
+        console.error(`[refreshStatus] Excepción al refrescar ${repoId}:`, {
+          error: errorMessage,
+          exception: err,
+          timestamp: new Date().toISOString(),
+        })
+        
         setError(errorMessage)
         setStatus("error")
-        setRepositoryId(null)
+        // NO resetear repositoryId en error - mantenerlo para permitir reintento
         setStatusData(null)
       } finally {
+        // SIEMPRE resetear loading, incluso si hay error
         setLoading(false)
+        console.log(`[refreshStatus] Finalizado para ${repoId}, loading=false`)
       }
     },
     [startPolling, updateUserPreferences]

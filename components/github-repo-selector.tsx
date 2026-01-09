@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { getAuth } from "firebase/auth"
 import { Button } from "@/components/ui/button"
-import { Loader2, Github, X } from "lucide-react"
+import { Loader2, Github, X, RefreshCw } from "lucide-react"
 
 interface GitHubRepo {
   id: number
@@ -34,45 +34,73 @@ export function GitHubRepoSelector({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const loadRepos = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      console.log("[GitHubRepoSelector] Cargando repositorios...")
+
+      const auth = getAuth()
+      const user = auth.currentUser
+
+      if (!user) {
+        const errorMessage = "Usuario no autenticado"
+        console.error("[GitHubRepoSelector] Error:", errorMessage)
+        throw new Error(errorMessage)
+      }
+
+      const token = await user.getIdToken()
+
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_CONTROLFILE_URL}/api/github/repos`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      )
+
+      console.log("[GitHubRepoSelector] Respuesta del backend:", {
+        status: res.status,
+        ok: res.ok,
+      })
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}))
+        const errorMessage = errorData.error || `Error ${res.status}: No se pudieron cargar los repositorios`
+        
+        console.error("[GitHubRepoSelector] Error del backend:", {
+          status: res.status,
+          error: errorMessage,
+        })
+        
+        throw new Error(errorMessage)
+      }
+
+      const data = await res.json()
+      const reposList = data.repos || []
+      
+      console.log("[GitHubRepoSelector] Repositorios cargados:", {
+        count: reposList.length,
+      })
+      
+      setRepos(reposList)
+    } catch (err: any) {
+      const errorMessage = err.message || "Error cargando repositorios"
+      console.error("[GitHubRepoSelector] Excepción:", {
+        error: errorMessage,
+        exception: err,
+      })
+      setError(errorMessage)
+    } finally {
+      setLoading(false)
+      console.log("[GitHubRepoSelector] Finalizado, loading=false")
+    }
+  }
+
   useEffect(() => {
     if (!isOpen) return
-
-    const loadRepos = async () => {
-      try {
-        setLoading(true)
-        setError(null)
-
-        const auth = getAuth()
-        const user = auth.currentUser
-
-        if (!user) {
-          throw new Error("Usuario no autenticado")
-        }
-
-        const token = await user.getIdToken()
-
-        const res = await fetch(
-          `${process.env.NEXT_PUBLIC_CONTROLFILE_URL}/api/github/repos`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        )
-
-        if (!res.ok) {
-          throw new Error("No se pudieron cargar los repositorios")
-        }
-
-        const data = await res.json()
-        setRepos(data.repos || [])
-      } catch (err: any) {
-        setError(err.message || "Error cargando repositorios")
-      } finally {
-        setLoading(false)
-      }
-    }
-
     loadRepos()
   }, [isOpen])
 
@@ -101,7 +129,27 @@ export function GitHubRepoSelector({
         )}
 
         {error && (
-          <p className="text-sm text-destructive">{error}</p>
+          <div className="space-y-2">
+            <p className="text-sm text-destructive">{error}</p>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={loadRepos}
+              disabled={loading}
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin mr-2" />
+                  Cargando...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-3 w-3 mr-2" />
+                  Reintentar
+                </>
+              )}
+            </Button>
+          </div>
         )}
 
         {!loading && !error && repos.length === 0 && (

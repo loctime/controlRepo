@@ -45,9 +45,12 @@ function parseGitHubUrl(url: string): { owner: string; repo: string; branch: str
 }
 
 export function AddRepositoryInline({ isOpen, onClose }: AddRepositoryInlineProps) {
-  const { indexRepository, loading, status } = useRepository()
+  const { indexRepository, loading, status, error: repoError } = useRepository()
   const [url, setUrl] = useState("")
   const [error, setError] = useState<string | null>(null)
+  
+  // Combinar errores locales y del contexto
+  const displayError = error || repoError
 
   // Resetear al cerrar
   useEffect(() => {
@@ -78,14 +81,29 @@ export function AddRepositoryInline({ isOpen, onClose }: AddRepositoryInlineProp
     try {
       // Construir repositoryId según contrato: github:owner:repo
       const repositoryId = `github:${parsed.owner}:${parsed.repo}`
+      
+      console.log("[AddRepositoryInline] Iniciando indexación:", {
+        repositoryId,
+        url: url.trim(),
+      })
+      
       await indexRepository(repositoryId)
+      
       // Colapsar y limpiar después de iniciar indexación
       setUrl("")
       setError(null)
       onClose()
     } catch (err) {
-      // El error ya se maneja en el contexto
-      console.error("Error al indexar repositorio:", err)
+      const errorMessage = err instanceof Error ? err.message : "Error desconocido al indexar"
+      
+      console.error("[AddRepositoryInline] Error al indexar repositorio:", {
+        error: errorMessage,
+        exception: err,
+        url: url.trim(),
+      })
+      
+      // Mostrar error local si el contexto no lo maneja
+      setError(errorMessage)
     }
   }
 
@@ -122,8 +140,15 @@ export function AddRepositoryInline({ isOpen, onClose }: AddRepositoryInlineProp
           aria-invalid={error ? "true" : "false"}
           className="font-mono text-sm"
         />
-        {error ? (
-          <p className="text-xs text-destructive">{error}</p>
+        {displayError ? (
+          <div className="space-y-1">
+            <p className="text-xs text-destructive">{displayError}</p>
+            {url.trim() && (
+              <p className="text-xs text-muted-foreground">
+                Verificá que la URL sea correcta y que GitHub esté conectado
+              </p>
+            )}
+          </div>
         ) : (
           <p className="text-xs text-muted-foreground">
             Pegá la URL del repositorio de GitHub
