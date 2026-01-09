@@ -169,30 +169,36 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
           const data = (await response.json()) as RepositoryStatusResponse
 
-          // Mapear "completed" a "ready" según el contrato API
-          const normalizedStatus = data.status === "completed" ? "ready" : data.status
+          // Logging claro del status recibido
+          console.log(`[startPolling] Status recibido para ${repoId}:`, {
+            status: data.status,
+            repositoryId: data.repositoryId,
+            error: data.error,
+            hasStats: !!data.stats,
+          })
 
-          // Actualizar estado exactamente como viene del backend (normalizado)
+          // Actualizar estado exactamente como viene del backend (sin normalizar)
           setRepositoryId(data.repositoryId)
-          setStatus(normalizedStatus)
+          setStatus(data.status)
           setStatusData({
             indexedAt: data.indexedAt,
             stats: data.stats,
           })
 
-          // Si hay error, mostrarlo
+          // Si hay error, mostrarlo claramente
           if (data.error) {
             setError(data.error)
+            console.error(`[startPolling] Error del backend para ${repoId}:`, data.error)
           } else {
             setError(null)
           }
 
-          // Detener polling cuando está ready o error
-          if (normalizedStatus === "ready" || normalizedStatus === "error") {
+          // Detener polling cuando está completed o error
+          if (data.status === "completed" || data.status === "error") {
             stopPolling()
             
-            if (normalizedStatus === "ready") {
-              // Verificar si acabamos de completar (transición de indexing a ready)
+            if (data.status === "completed") {
+              // Verificar si acabamos de completar (transición de indexing a completed)
               const wasIndexing = status === "indexing"
               if (wasIndexing) {
                 const fileCount = data.stats?.totalFiles || 0
@@ -204,6 +210,14 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
               
               // Actualizar preferencias cuando se completa
               await updateUserPreferences(data.repositoryId)
+            } else if (data.status === "error") {
+              // Mostrar error real cuando status === "error"
+              if (data.error) {
+                toast.error("Error al indexar repositorio", {
+                  description: data.error,
+                  duration: 10000,
+                })
+              }
             }
           }
           // Si está indexing o idle, continuar polling
@@ -280,6 +294,13 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
         const data = (await response.json()) as IndexRepositoryResponse
 
+        // Logging claro del status recibido
+        console.log(`[indexRepository] Status recibido para ${repoId}:`, {
+          status: data.status,
+          repositoryId: data.repositoryId,
+          message: data.message,
+        })
+
         // Actualizar estado según respuesta del backend
         setRepositoryId(data.repositoryId)
         setStatus(data.status)
@@ -287,8 +308,8 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         // Si está indexing, iniciar polling
         if (data.status === "indexing") {
           startPolling(data.repositoryId)
-        } else if (data.status === "ready") {
-          // Si ya está ready, refrescar status para obtener stats
+        } else if (data.status === "completed" || data.status === "ready") {
+          // Si ya está completed/ready, refrescar status para obtener stats
           await refreshStatus(data.repositoryId)
           await updateUserPreferences(data.repositoryId)
         }
@@ -331,32 +352,47 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
         const data = (await response.json()) as RepositoryStatusResponse
 
-        // Mapear "completed" a "ready" según el contrato API
-        const normalizedStatus = data.status === "completed" ? "ready" : data.status
+        // Logging claro del status recibido
+        console.log(`[refreshStatus] Status recibido para ${repoId}:`, {
+          status: data.status,
+          repositoryId: data.repositoryId,
+          error: data.error,
+          hasStats: !!data.stats,
+        })
 
-        // Actualizar estado exactamente como viene del backend (normalizado)
+        // Actualizar estado exactamente como viene del backend (sin normalizar)
         setRepositoryId(data.repositoryId)
-        setStatus(normalizedStatus)
+        setStatus(data.status)
         setStatusData({
           indexedAt: data.indexedAt,
           stats: data.stats,
         })
 
+        // Si hay error, mostrarlo claramente
         if (data.error) {
           setError(data.error)
+          console.error(`[refreshStatus] Error del backend para ${repoId}:`, data.error)
         } else {
           setError(null)
         }
 
         // Si está indexing, iniciar polling (solo si no hay uno activo)
-        if (normalizedStatus === "indexing") {
+        if (data.status === "indexing") {
           if (!pollingRef.current.intervalId) {
             startPolling(data.repositoryId)
           }
-        } else if (normalizedStatus === "ready") {
+        } else if (data.status === "completed") {
           await updateUserPreferences(data.repositoryId)
-        } else if (normalizedStatus === "idle") {
+        } else if (data.status === "idle") {
           await updateUserPreferences(null)
+        } else if (data.status === "error") {
+          // Mostrar error real cuando status === "error"
+          if (data.error) {
+            toast.error("Error en el repositorio", {
+              description: data.error,
+              duration: 10000,
+            })
+          }
         }
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Error desconocido al refrescar"

@@ -38,8 +38,8 @@ const categoryLabels: Record<FileCategory, string> = {
 export function SidebarPanel() {
   const { repositoryId, status, statusData } = useRepository()
 
-  // Detectar si hay repositorio disponible
-  const hasRepository = status === "ready"
+  // Detectar si hay repositorio disponible (solo completed habilita el chat)
+  const hasRepository = status === "completed"
 
   // Obtener lenguajes principales (top 5)
   const topLanguages = hasRepository && statusData?.stats?.languages

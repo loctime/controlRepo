@@ -16,7 +16,7 @@ export interface IndexRepositoryRequest {
 
 export interface IndexRepositoryResponse {
   repositoryId: string
-  status: "indexing" | "ready"
+  status: "indexing" | "ready" | "completed"
   message: string
 }
 
@@ -26,7 +26,7 @@ export interface IndexRepositoryResponse {
 
 export interface RepositoryStatusResponse {
   repositoryId: string
-  status: "idle" | "indexing" | "ready" | "error"
+  status: "idle" | "indexing" | "ready" | "completed" | "error"
   indexedAt?: string // ISO 8601
   stats?: {
     totalFiles: number

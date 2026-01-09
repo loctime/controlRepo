@@ -154,7 +154,7 @@ export function HeaderRepository() {
             </Badge>
           )}
 
-          {status === "ready" && (
+          {status === "completed" && (
             <Badge variant="default" className="gap-1 h-6 text-xs">
               Listo
             </Badge>
@@ -176,7 +176,7 @@ export function HeaderRepository() {
 
         {/* Acciones */}
         <div className="flex items-center gap-1.5 shrink-0">
-          {status === "ready" && repositoryId && (
+          {status === "completed" && repositoryId && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button

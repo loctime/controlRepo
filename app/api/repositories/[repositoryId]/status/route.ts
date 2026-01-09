@@ -43,10 +43,10 @@ export async function GET(
       })
     }
 
-    // Mapear "completed" a "ready" según contrato
+    // No mapear status - aceptar "completed" directamente
     const transformedData = {
       ...data,
-      status: data.status === "completed" ? "ready" : data.status,
+      status: data.status, // Mantener el status tal como viene del backend
       // Asegurar que stats tenga el formato correcto
       stats: data.stats
         ? {

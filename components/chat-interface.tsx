@@ -61,7 +61,8 @@ export function ChatInterface() {
   const { repositoryId, preferencesLoaded, status, error } = useRepository()
   const { setContextFiles } = useContextFiles()
 
-  const canChat = status === "ready"
+  // Solo status === "completed" habilita el chat
+  const canChat = status === "completed"
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
