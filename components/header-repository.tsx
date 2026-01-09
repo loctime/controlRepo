@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -35,6 +35,23 @@ export function HeaderRepository() {
   
   // Usar el nuevo hook con estados explícitos
   const { state: githubState, error: githubError, checkStatus, connect, isChecking } = useGitHubConnection()
+
+  // Verificar estado de GitHub cuando el componente se monta o cuando cambia la visibilidad
+  // Esto asegura que el estado se actualice después del OAuth
+  useEffect(() => {
+    // Verificar estado al montar
+    checkStatus()
+
+    // También verificar cuando la ventana vuelve a tener foco (útil después de OAuth)
+    const handleFocus = () => {
+      console.log("[HeaderRepository] Ventana recuperó foco, verificando estado GitHub...")
+      checkStatus()
+    }
+
+    window.addEventListener("focus", handleFocus)
+    return () => window.removeEventListener("focus", handleFocus)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Solo al montar
 
   // Parsear repositoryId para obtener owner/repo
   const parsedRepo = repositoryId
@@ -205,8 +222,16 @@ export function HeaderRepository() {
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => indexRepository(repositoryId, true)}
-                  disabled={loading || reindexing || githubState !== "connected"}
+                  onClick={() => {
+                    if (githubState === "connected") {
+                      indexRepository(repositoryId, true)
+                    } else {
+                      // Si GitHub no está conectado, mostrar mensaje pero permitir intentar
+                      // El backend rechazará con un mensaje claro
+                      indexRepository(repositoryId, true)
+                    }
+                  }}
+                  disabled={loading || reindexing || githubState === "connecting"}
                   className="h-6 text-xs gap-1"
                 >
                   {loading || reindexing ? (
@@ -217,7 +242,13 @@ export function HeaderRepository() {
                   Reintentar
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Reintentar indexación</TooltipContent>
+              <TooltipContent>
+                {githubState === "connecting"
+                  ? "Esperando conexión de GitHub..."
+                  : githubState !== "connected"
+                  ? "Reintentar (conectá GitHub si es necesario)"
+                  : "Reintentar indexación"}
+              </TooltipContent>
             </Tooltip>
           )}
 

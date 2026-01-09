@@ -52,14 +52,29 @@ export function GitHubRepoSelector({
 
       const token = await user.getIdToken()
 
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_CONTROLFILE_URL}/api/github/repos`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+      // Agregar timeout de 15 segundos
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 15000)
+
+      let res: Response
+      try {
+        res = await fetch(
+          `${process.env.NEXT_PUBLIC_CONTROLFILE_URL}/api/github/repos`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            signal: controller.signal,
+          }
+        )
+        clearTimeout(timeoutId)
+      } catch (fetchError) {
+        clearTimeout(timeoutId)
+        if (fetchError instanceof Error && fetchError.name === "AbortError") {
+          throw new Error("Timeout: La carga de repositorios tardó más de 15 segundos")
         }
-      )
+        throw fetchError
+      }
 
       console.log("[GitHubRepoSelector] Respuesta del backend:", {
         status: res.status,
@@ -67,18 +82,43 @@ export function GitHubRepoSelector({
       })
 
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}))
-        const errorMessage = errorData.error || `Error ${res.status}: No se pudieron cargar los repositorios`
+        // Intentar parsear error, pero manejar respuestas no-JSON
+        let errorData: any = {}
+        try {
+          const text = await res.text()
+          if (text) {
+            errorData = JSON.parse(text)
+          }
+        } catch {
+          // Respuesta no es JSON
+        }
+        
+        const errorMessage = errorData.error || `Error ${res.status}: ${res.statusText || "No se pudieron cargar los repositorios"}`
         
         console.error("[GitHubRepoSelector] Error del backend:", {
           status: res.status,
+          statusText: res.statusText,
           error: errorMessage,
+          timestamp: new Date().toISOString(),
         })
         
         throw new Error(errorMessage)
       }
 
-      const data = await res.json()
+      // Parsear respuesta JSON con protección
+      let data: any = {}
+      try {
+        const text = await res.text()
+        if (text) {
+          data = JSON.parse(text)
+        }
+      } catch (parseError) {
+        console.error("[GitHubRepoSelector] Error al parsear respuesta JSON:", {
+          error: parseError,
+        })
+        throw new Error("Respuesta inválida del servidor")
+      }
+      
       const reposList = data.repos || []
       
       console.log("[GitHubRepoSelector] Repositorios cargados:", {

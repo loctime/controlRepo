@@ -40,33 +40,6 @@ const RepositoryContext = createContext<RepositoryContextType | undefined>(undef
 
 const POLLING_INTERVAL = 4000 // 4 segundos
 
-/**
- * Parsea repositoryId en formato: github:owner:repo
- */
-function parseRepositoryId(repositoryId: string): { owner: string; repo: string } | null {
-  if (!repositoryId || typeof repositoryId !== "string") {
-    return null
-  }
-  
-  const trimmed = repositoryId.trim()
-  if (!trimmed || !trimmed.startsWith("github:")) {
-    return null
-  }
-  
-  const parts = trimmed.replace("github:", "").split(":")
-  if (parts.length !== 2) {
-    return null
-  }
-  
-  const owner = parts[0].trim()
-  const repo = parts[1].trim()
-  if (!owner || !repo) {
-    return null
-  }
-  
-  return { owner, repo }
-}
-
 export function RepositoryProvider({ children }: { children: React.ReactNode }) {
   const [repositoryId, setRepositoryId] = useState<string | null>(null)
   const [status, setStatus] = useState<RepositoryStatusResponse["status"]>("idle")
@@ -80,9 +53,11 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
   const pollingRef = useRef<{
     intervalId: ReturnType<typeof setInterval> | null
     repositoryId: string | null
+    prevStatus: RepositoryStatusResponse["status"] | null
   }>({
     intervalId: null,
     repositoryId: null,
+    prevStatus: null,
   })
 
   // Limpiar polling al desmontar
@@ -141,6 +116,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
       pollingRef.current.intervalId = null
     }
     pollingRef.current.repositoryId = null
+    pollingRef.current.prevStatus = null
   }, [])
 
   /**
@@ -156,18 +132,51 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
       stopPolling()
       pollingRef.current.repositoryId = repoId
+      // Inicializar prevStatus con el estado actual antes de empezar polling
+      pollingRef.current.prevStatus = status
 
       const poll = async () => {
         try {
-          const response = await fetch(`/api/repository/status?repositoryId=${encodeURIComponent(repoId)}`)
+          // Agregar timeout de 10 segundos para polling
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 10000)
+
+          let response: Response
+          try {
+            response = await fetch(`/api/repository/status?repositoryId=${encodeURIComponent(repoId)}`, {
+              signal: controller.signal,
+            })
+            clearTimeout(timeoutId)
+          } catch (fetchError) {
+            clearTimeout(timeoutId)
+            if (fetchError instanceof Error && fetchError.name === "AbortError") {
+              console.warn(`[startPolling] Timeout al obtener estado para ${repoId}`)
+              return // No detener polling por timeouts temporales
+            }
+            throw fetchError
+          }
 
           // Según el contrato: siempre devuelve 200
           if (!response.ok) {
-            console.error(`[startPolling] Error al obtener estado: ${response.statusText}`)
+            console.error(`[startPolling] Error al obtener estado: ${response.status} ${response.statusText}`)
             return
           }
 
-          const data = (await response.json()) as RepositoryStatusResponse
+          // Parsear respuesta JSON con protección
+          let data: RepositoryStatusResponse
+          try {
+            const text = await response.text()
+            if (!text) {
+              console.warn(`[startPolling] Respuesta vacía para ${repoId}`)
+              return
+            }
+            data = JSON.parse(text) as RepositoryStatusResponse
+          } catch (parseError) {
+            console.error(`[startPolling] Error al parsear respuesta JSON para ${repoId}:`, {
+              error: parseError,
+            })
+            return // No detener polling por errores de parseo temporales
+          }
 
           // Logging claro del status recibido
           console.log(`[startPolling] Status recibido para ${repoId}:`, {
@@ -178,6 +187,9 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
             timestamp: new Date().toISOString(),
           })
 
+          // Guardar estado previo antes de actualizar (para detectar transiciones)
+          const prevStatus = pollingRef.current.prevStatus
+
           // Actualizar estado exactamente como viene del backend (sin normalizar)
           setRepositoryId(data.repositoryId)
           setStatus(data.status)
@@ -185,6 +197,9 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
             indexedAt: data.indexedAt,
             stats: data.stats,
           })
+
+          // Actualizar ref con el nuevo status para la próxima iteración
+          pollingRef.current.prevStatus = data.status
 
           // Si hay error, mostrarlo claramente
           if (data.error) {
@@ -205,7 +220,8 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
             
             if (data.status === "completed") {
               // Verificar si acabamos de completar (transición de indexing a completed)
-              const wasIndexing = status === "indexing"
+              // Usar prevStatus del ref en lugar del closure para detectar correctamente la transición
+              const wasIndexing = prevStatus === "indexing"
               if (wasIndexing) {
                 const fileCount = data.stats?.totalFiles || 0
                 toast.success("Repositorio indexado correctamente", {
@@ -289,14 +305,29 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         // Log del payload antes del fetch
         console.log("Index request payload:", { repositoryId: repoId })
 
-        const response = await fetch("/api/repositories/index", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`,
-          },
-          body: JSON.stringify(requestBody),
-        })
+        // Agregar timeout de 30 segundos para indexación
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 30000)
+
+        let response: Response
+        try {
+          response = await fetch("/api/repositories/index", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${token}`,
+            },
+            body: JSON.stringify(requestBody),
+            signal: controller.signal,
+          })
+          clearTimeout(timeoutId)
+        } catch (fetchError) {
+          clearTimeout(timeoutId)
+          if (fetchError instanceof Error && fetchError.name === "AbortError") {
+            throw new Error("Timeout: La solicitud de indexación tardó más de 30 segundos")
+          }
+          throw fetchError
+        }
 
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}))
@@ -373,14 +404,55 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
       setError(null)
 
       try {
-        // Según el contrato: siempre devuelve 200
-        const response = await fetch(`/api/repository/status?repositoryId=${encodeURIComponent(repoId)}`)
+        // Agregar timeout de 10 segundos
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 10000)
 
-        if (!response.ok) {
-          throw new Error(`Error al obtener estado: ${response.statusText}`)
+        let response: Response
+        try {
+          response = await fetch(`/api/repository/status?repositoryId=${encodeURIComponent(repoId)}`, {
+            signal: controller.signal,
+          })
+          clearTimeout(timeoutId)
+        } catch (fetchError) {
+          clearTimeout(timeoutId)
+          if (fetchError instanceof Error && fetchError.name === "AbortError") {
+            throw new Error("Timeout: La verificación de estado tardó más de 10 segundos")
+          }
+          throw fetchError
         }
 
-        const data = (await response.json()) as RepositoryStatusResponse
+        if (!response.ok) {
+          // Intentar parsear error
+          let errorData: any = {}
+          try {
+            const text = await response.text()
+            if (text) {
+              errorData = JSON.parse(text)
+            }
+          } catch {
+            // Respuesta no es JSON
+          }
+          
+          const errorMessage = errorData.error || `Error ${response.status}: ${response.statusText || "Error desconocido"}`
+          throw new Error(errorMessage)
+        }
+
+        // Parsear respuesta JSON con protección
+        let data: RepositoryStatusResponse
+        try {
+          const text = await response.text()
+          if (!text) {
+            throw new Error("Respuesta vacía del servidor")
+          }
+          data = JSON.parse(text) as RepositoryStatusResponse
+        } catch (parseError) {
+          console.error("[refreshStatus] Error al parsear respuesta JSON:", {
+            error: parseError,
+            status: response.status,
+          })
+          throw new Error("Respuesta inválida del servidor")
+        }
 
         // Logging claro del status recibido
         console.log(`[refreshStatus] Status recibido para ${repoId}:`, {
