@@ -35,8 +35,8 @@ async function getRepositoryIndexFromBackend(repositoryId: string): Promise<Repo
 
     const data = await response.json()
     
-    // El backend devuelve el índice completo en data.index cuando status === "completed"
-    if (data.index && data.index.status === "completed") {
+    // El backend devuelve el índice completo en data.index cuando status === "completed" o "ready" (legacy)
+    if (data.index && (data.index.status === "completed" || data.index.status === "ready")) {
       console.log(`[selectFilesFromIndex] Índice obtenido del backend para ${repositoryId}`)
       return data.index as RepositoryIndex
     }

@@ -479,7 +479,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (index.status !== "completed") {
+    if (index.status !== "completed" && index.status !== "ready") {
       return NextResponse.json(
         {
           error: `El repositorio ${repositoryId} está siendo indexado (status: ${index.status}). Por favor, espera a que termine la indexación.`,

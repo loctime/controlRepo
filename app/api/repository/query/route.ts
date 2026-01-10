@@ -41,8 +41,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Verificar si el índice está completo
-    if (index.status !== "completed") {
+    // Verificar si el índice está completo (acepta "completed" y "ready" para compatibilidad legacy)
+    if (index.status !== "completed" && index.status !== "ready") {
       return NextResponse.json(
         {
           error: `El repositorio ${repositoryId} está siendo indexado (status: ${index.status}). Por favor, espera a que termine la indexación.`,
