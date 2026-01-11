@@ -195,6 +195,9 @@ export function ChatInterface() {
   const handleSend = async () => {
     if (!input.trim() || loading || processingPrevious || !canChat || isSendingRef.current) return
 
+    // Establecer flag ANTES de cualquier otra operación para prevenir doble envío
+    isSendingRef.current = true
+
     if (!repositoryId) {
       setMessages((prev) => [
         ...prev,
@@ -204,6 +207,7 @@ export function ChatInterface() {
             "No hay un repositorio seleccionado o indexado. Seleccioná uno primero.",
         },
       ])
+      isSendingRef.current = false
       return
     }
 
@@ -211,7 +215,6 @@ export function ChatInterface() {
     setInput("")
     setLoading(true)
     setProcessingPrevious(false)
-    isSendingRef.current = true
 
     setMessages((prev) => [...prev, { role: "user", content: question }])
     setMessages((prev) => [
@@ -362,9 +365,11 @@ export function ChatInterface() {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
+      e.stopPropagation()
       handleSend()
     } else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault()
+      e.stopPropagation()
       handleSend()
     }
   }
