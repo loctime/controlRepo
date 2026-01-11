@@ -179,6 +179,10 @@ export async function GET(request: NextRequest) {
     if (localIndex) {
       const { index, branch } = localIndex
       
+      // Calcular totalSize sumando los tamaños de todos los archivos
+      const totalSize = index.files?.reduce((sum, file) => sum + (file.size || 0), 0) || 0
+      const totalFiles = index.summary?.totalFiles || index.files?.length || 0
+      
       // Devolver respuesta con formato esperado por el frontend
       // El backend devuelve "completed" cuando está indexado
       // Incluir el índice completo para que el frontend pueda usarlo
@@ -189,9 +193,10 @@ export async function GET(request: NextRequest) {
         repo,
         branch,
         indexedAt: index.indexedAt,
-        totalFiles: index.summary?.totalFiles || index.files?.length || 0,
+        totalFiles,
         stats: {
-          totalFiles: index.summary?.totalFiles || index.files?.length || 0,
+          totalFiles,
+          totalSize,
           totalLines: index.summary?.totalLines || 0,
           languages: normalizeLanguages(index.summary?.languages),
         },

@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { FileText, Map, GitBranch, Code2, Package, Settings, BookOpen, TestTube, Wrench, Palette, BarChart3 } from "lucide-react"
 import { useRepository } from "@/lib/repository-context"
 import { RepositoryMetrics as RepositoryMetricsView } from "@/components/repository-metrics"
+import type { FileCategory } from "@/lib/types/repository"
 
 // Iconos por categoría
 const categoryIcons: Record<FileCategory, typeof Code2> = {
@@ -39,7 +40,8 @@ export function SidebarPanel() {
   const { repositoryId, status, statusData } = useRepository()
 
   // Detectar si hay repositorio disponible (solo completed habilita el chat)
-  const hasRepository = status === "completed"
+  // También verificar que statusData existe para mostrar contenido
+  const hasRepository = status === "completed" && statusData?.stats
 
   // Obtener lenguajes principales (top 5)
   const topLanguages = hasRepository && statusData?.stats?.languages

@@ -322,20 +322,20 @@ export function ChatInterface() {
   return (
     <Card className="h-full flex flex-col gap-0">
       <div className="border-b px-3 py-2 flex justify-between items-center">
+        <div>
+          <h2 className="font-semibold">Chat del Repositorio</h2>
+          <p className="text-xs text-muted-foreground">
+            Modo lectura • Respuestas verificables
+          </p>
+        </div>
         <div className="flex items-center gap-2">
-          <div>
-            <h2 className="font-semibold">Chat del Repositorio</h2>
-            <p className="text-xs text-muted-foreground">
-              Modo lectura • Respuestas verificables
-            </p>
-          </div>
           {llmDebug && llmDebug.engine && llmDebug.model && llmDebug.location && (
             <Badge variant="outline" className="text-xs">
               🧠 {llmDebug.engine} · {llmDebug.model} · {llmDebug.location}
             </Badge>
           )}
+          <ContextPanel compact />
         </div>
-        <ContextPanel compact />
       </div>
 
       <ScrollArea className="flex-1 p-3">
