@@ -58,6 +58,8 @@ export function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
+  const [conversationId, setConversationId] = useState<string | undefined>(undefined)
+  const [processingPrevious, setProcessingPrevious] = useState(false)
   const [llmDebug, setLlmDebug] = useState<{
     engine?: string
     model?: string
@@ -73,6 +75,7 @@ export function ChatInterface() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const isSendingRef = useRef(false)
 
   /* -------------------------------------------
    * Auto scroll
@@ -162,6 +165,14 @@ export function ChatInterface() {
   }, [repositoryId, preferencesLoaded])
 
   /* -------------------------------------------
+   * Reset conversationId cuando cambia el repositorio
+   * ------------------------------------------- */
+  useEffect(() => {
+    setConversationId(undefined)
+    setProcessingPrevious(false)
+  }, [repositoryId])
+
+  /* -------------------------------------------
    * Cancelar request
    * ------------------------------------------- */
   const handleCancel = () => {
@@ -182,7 +193,7 @@ export function ChatInterface() {
    * Enviar pregunta
    * ------------------------------------------- */
   const handleSend = async () => {
-    if (!input.trim() || loading || !canChat) return
+    if (!input.trim() || loading || processingPrevious || !canChat || isSendingRef.current) return
 
     if (!repositoryId) {
       setMessages((prev) => [
@@ -199,6 +210,8 @@ export function ChatInterface() {
     const question = input.trim()
     setInput("")
     setLoading(true)
+    setProcessingPrevious(false)
+    isSendingRef.current = true
 
     setMessages((prev) => [...prev, { role: "user", content: question }])
     setMessages((prev) => [
@@ -217,12 +230,30 @@ export function ChatInterface() {
         body: JSON.stringify({
           repositoryId,
           question,
+          ...(conversationId && { conversationId }),
         }),
       })
 
       if (controller.signal.aborted) return
 
       const data = (await res.json()) as ChatQueryResponse
+
+      // Manejar 409: lock activo, no es un error
+      if (res.status === 409) {
+        setLoading(false)
+        setProcessingPrevious(true)
+        setMessages((prev) => {
+          const updated = [...prev]
+          updated[updated.length - 1] = {
+            role: "assistant",
+            content: "Procesando respuesta anterior…",
+          }
+          return updated
+        })
+        setContextFiles([])
+        isSendingRef.current = false
+        return
+      }
 
       // Según contrato: 200 = success, 202 = indexing, 400 = not ready
       if (res.status === 202) {
@@ -237,6 +268,8 @@ export function ChatInterface() {
           return updated
         })
         setContextFiles([])
+        setProcessingPrevious(false)
+        isSendingRef.current = false
         return
       }
 
@@ -252,6 +285,8 @@ export function ChatInterface() {
           return updated
         })
         setContextFiles([])
+        setProcessingPrevious(false)
+        isSendingRef.current = false
         return
       }
 
@@ -261,6 +296,11 @@ export function ChatInterface() {
 
       // Response 200: success
       const successData = data as Extract<ChatQueryResponse, { response: string }>
+      
+      // Guardar conversationId si viene en la respuesta
+      if (successData.conversationId) {
+        setConversationId(successData.conversationId)
+      }
       
       const contextFiles = successData.sources?.map((source) => ({
         name: source.path.split("/").pop() || source.path,
@@ -288,10 +328,16 @@ export function ChatInterface() {
         }
         return updated
       })
+      
+      setProcessingPrevious(false)
     } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") return
+      if (err instanceof Error && err.name === "AbortError") {
+        isSendingRef.current = false
+        return
+      }
 
       setContextFiles([])
+      setProcessingPrevious(false)
       setMessages((prev) => {
         const updated = [...prev]
         updated[updated.length - 1] = {
@@ -306,6 +352,7 @@ export function ChatInterface() {
     } finally {
       setLoading(false)
       abortControllerRef.current = null
+      isSendingRef.current = false
     }
   }
 
@@ -313,7 +360,10 @@ export function ChatInterface() {
    * Keybindings
    * ------------------------------------------- */
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
+    } else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault()
       handleSend()
     }
@@ -345,6 +395,10 @@ export function ChatInterface() {
               msg.role === "assistant" &&
               msg.content === "Pensando..." &&
               loading
+            const processingPrev =
+              msg.role === "assistant" &&
+              msg.content === "Procesando respuesta anterior…" &&
+              processingPrevious
 
             return (
               <div
@@ -356,7 +410,7 @@ export function ChatInterface() {
                 {msg.role === "assistant" && (
                   <Avatar className="h-8 w-8 bg-primary">
                     <AvatarFallback>
-                      {thinking ? (
+                      {(thinking || processingPrev) ? (
                         <Spinner className="h-4 w-4 text-primary-foreground" />
                       ) : (
                         <Bot className="h-4 w-4 text-primary-foreground" />
@@ -370,6 +424,11 @@ export function ChatInterface() {
                     <div className="flex gap-2 items-center">
                       <Spinner className="h-4 w-4" />
                       <span className="italic">Pensando...</span>
+                    </div>
+                  ) : processingPrev ? (
+                    <div className="flex gap-2 items-center">
+                      <Spinner className="h-4 w-4" />
+                      <span className="italic">Procesando respuesta anterior…</span>
                     </div>
                   ) : (
                     msg.content
@@ -398,6 +457,11 @@ export function ChatInterface() {
             {status === "error" && (error || "Error en el repositorio")}
           </div>
         )}
+        {processingPrevious && (
+          <div className="mb-2 text-sm text-muted-foreground">
+            Procesando respuesta anterior…
+          </div>
+        )}
         <form
           onSubmit={(e) => {
             e.preventDefault()
@@ -411,7 +475,7 @@ export function ChatInterface() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Pregunta sobre el repositorio…"
-            disabled={loading || !canChat}
+            disabled={loading || processingPrevious || !canChat}
             rows={1}
             className="resize-none"
           />
@@ -426,7 +490,7 @@ export function ChatInterface() {
               <X className="h-4 w-4" />
             </Button>
           ) : (
-            <Button type="submit" size="icon" disabled={!input.trim() || !canChat}>
+            <Button type="submit" size="icon" disabled={!input.trim() || processingPrevious || !canChat}>
               <Send className="h-4 w-4" />
             </Button>
           )}
