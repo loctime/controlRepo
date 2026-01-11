@@ -11,6 +11,7 @@ import { ContextPanel } from "./context-panel"
 import { useRepository } from "@/lib/repository-context"
 import { useContextFiles } from "@/lib/context-files-context"
 import { Spinner } from "@/components/ui/spinner"
+import { Badge } from "@/components/ui/badge"
 import type { ChatQueryResponse } from "@/lib/types/api-contract"
 
 interface Message {
@@ -57,6 +58,11 @@ export function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
+  const [llmDebug, setLlmDebug] = useState<{
+    engine?: string
+    model?: string
+    location?: string
+  } | null>(null)
 
   const { repositoryId, preferencesLoaded, status, error } = useRepository()
   const { setContextFiles } = useContextFiles()
@@ -263,6 +269,17 @@ export function ChatInterface() {
 
       setContextFiles(contextFiles)
 
+      // Guardar información debug del motor LLM si existe
+      if (successData.debug) {
+        setLlmDebug({
+          engine: successData.debug.engine,
+          model: successData.debug.model,
+          location: successData.debug.location,
+        })
+      } else {
+        setLlmDebug(null)
+      }
+
       setMessages((prev) => {
         const updated = [...prev]
         updated[updated.length - 1] = {
@@ -305,11 +322,18 @@ export function ChatInterface() {
   return (
     <Card className="h-full flex flex-col gap-0">
       <div className="border-b px-3 py-2 flex justify-between items-center">
-        <div>
-          <h2 className="font-semibold">Chat del Repositorio</h2>
-          <p className="text-xs text-muted-foreground">
-            Modo lectura • Respuestas verificables
-          </p>
+        <div className="flex items-center gap-2">
+          <div>
+            <h2 className="font-semibold">Chat del Repositorio</h2>
+            <p className="text-xs text-muted-foreground">
+              Modo lectura • Respuestas verificables
+            </p>
+          </div>
+          {llmDebug && llmDebug.engine && llmDebug.model && llmDebug.location && (
+            <Badge variant="outline" className="text-xs">
+              🧠 {llmDebug.engine} · {llmDebug.model} · {llmDebug.location}
+            </Badge>
+          )}
         </div>
         <ContextPanel compact />
       </div>

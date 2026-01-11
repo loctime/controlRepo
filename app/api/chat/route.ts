@@ -666,7 +666,9 @@ Main Languages: ${mainLanguages}
           risks: [],
         },
         debug: {
+          engine: "Ollama",
           model: "phi3:mini",
+          location: "local",
           contextFiles: 0,
           role: assistantRole,
           isSocial: true,
@@ -768,7 +770,9 @@ Main Languages: ${mainLanguages}
         risks: findings.risks,
       },
       debug: {
+        engine: "Ollama",
         model: "phi3:mini",
+        location: "local",
         contextFiles: relevantFiles.length,
         declaredSources: validSources.length,
         invalidSourcesDiscarded: invalidSources.length,

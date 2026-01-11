@@ -53,6 +53,11 @@ export interface ChatQueryResponseSuccess {
     path: string
     lines: [number, number]
   }>
+  debug?: {
+    engine?: string
+    model?: string
+    location?: string
+  }
 }
 
 export interface ChatQueryResponseIndexing {
