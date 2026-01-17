@@ -244,7 +244,7 @@ export function ChatInterface() {
       // Manejar 409: lock activo, no es un error
       if (res.status === 409) {
         setLoading(false)
-        setProcessingPrevious(true)
+        setProcessingPrevious(false)
         setMessages((prev) => {
           const updated = [...prev]
           updated[updated.length - 1] = {
