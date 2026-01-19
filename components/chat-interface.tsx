@@ -58,9 +58,9 @@ function parseRepositoryId(repositoryId: string): { owner: string; repo: string 
 export function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
-  const [loading, setLoading] = useState(false)
+  const [isQueryRunning, setIsQueryRunning] = useState(false)
   const [conversationId, setConversationId] = useState<string | undefined>(undefined)
-  const [processingPrevious, setProcessingPrevious] = useState(false)
+  const [waitingForPrevious, setWaitingForPrevious] = useState(false)
   const [llmDebug, setLlmDebug] = useState<{
     engine?: string
     model?: string
@@ -77,13 +77,14 @@ export function ChatInterface() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const isSendingRef = useRef(false)
+  const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   /* -------------------------------------------
    * Auto scroll
    * ------------------------------------------- */
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages, loading])
+  }, [messages, isQueryRunning])
 
   /* -------------------------------------------
    * Auto resize textarea
@@ -170,8 +171,25 @@ export function ChatInterface() {
    * ------------------------------------------- */
   useEffect(() => {
     setConversationId(undefined)
-    setProcessingPrevious(false)
+    setWaitingForPrevious(false)
+    setIsQueryRunning(false)
+    // Limpiar timeout de reintento si existe
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current)
+      retryTimeoutRef.current = null
+    }
   }, [repositoryId])
+
+  /* -------------------------------------------
+   * Limpiar timeout al desmontar
+   * ------------------------------------------- */
+  useEffect(() => {
+    return () => {
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current)
+      }
+    }
+  }, [])
 
   /* -------------------------------------------
    * Cancelar request
@@ -179,11 +197,20 @@ export function ChatInterface() {
   const handleCancel = () => {
     abortControllerRef.current?.abort()
     abortControllerRef.current = null
-    setLoading(false)
+    
+    // Limpiar timeout de reintento si existe
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current)
+      retryTimeoutRef.current = null
+    }
+    
+    setIsQueryRunning(false)
+    setWaitingForPrevious(false)
+    isSendingRef.current = false
 
     setMessages((prev) => {
       const last = prev[prev.length - 1]
-      if (last?.role === "assistant" && last.content === "Pensando...") {
+      if (last?.role === "assistant" && (last.content === "Pensando..." || last.content === "Esperando que termine la consulta anterior…")) {
         return prev.slice(0, -1)
       }
       return prev
@@ -194,10 +221,15 @@ export function ChatInterface() {
    * Enviar pregunta
    * ------------------------------------------- */
   const handleSend = async () => {
-    if (!input.trim() || loading || processingPrevious || !canChat || isSendingRef.current) return
+    // Prevenir múltiples envíos simultáneos
+    if (!input.trim() || isQueryRunning || !canChat || isSendingRef.current) {
+      return
+    }
 
     // Establecer flag ANTES de cualquier otra operación para prevenir doble envío
     isSendingRef.current = true
+    setIsQueryRunning(true)
+    setWaitingForPrevious(false)
 
     if (!repositoryId) {
       setMessages((prev) => [
@@ -208,14 +240,13 @@ export function ChatInterface() {
             "No hay un repositorio seleccionado o indexado. Seleccioná uno primero.",
         },
       ])
+      setIsQueryRunning(false)
       isSendingRef.current = false
       return
     }
 
     const question = input.trim()
     setInput("")
-    setLoading(true)
-    setProcessingPrevious(false)
 
     setMessages((prev) => [...prev, { role: "user", content: question }])
     setMessages((prev) => [
@@ -238,110 +269,103 @@ export function ChatInterface() {
         }),
       })
 
-      if (controller.signal.aborted) return
+      if (controller.signal.aborted) {
+        return
+      }
 
       const data = (await res.json()) as ChatQueryResponse
 
-      // Manejar 409: lock activo, no es un error
+      // Manejar 409: lock activo, no es un error - estado esperado
       if (res.status === 409) {
-        setLoading(false)
-        setProcessingPrevious(false)
+        setWaitingForPrevious(true)
         setMessages((prev) => {
           const updated = [...prev]
           updated[updated.length - 1] = {
             role: "assistant",
-            content: "Procesando respuesta anterior…",
+            content: "Esperando que termine la consulta anterior…",
           }
           return updated
         })
         setContextFiles([])
-        isSendingRef.current = false
-        return
-      }
-
-      // Según contrato: 200 = success, 202 = indexing, 400 = not ready
-      if (res.status === 202) {
-        // Repositorio indexando
-        const indexingData = data as Extract<ChatQueryResponse, { status: "indexing" }>
-        setMessages((prev) => {
-          const updated = [...prev]
-          updated[updated.length - 1] = {
-            role: "assistant",
-            content: indexingData.message,
+        
+        // Reintentar automáticamente una sola vez después de 600ms
+        retryTimeoutRef.current = setTimeout(async () => {
+          // Verificar que no se canceló
+          if (controller.signal.aborted) {
+            return
           }
-          return updated
-        })
-        setContextFiles([])
-        setProcessingPrevious(false)
-        isSendingRef.current = false
-        return
-      }
+          
+          try {
+            const retryRes = await fetch("/api/chat/query", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              signal: controller.signal,
+              body: JSON.stringify({
+                repositoryId,
+                question,
+                ...(conversationId && { conversationId }),
+              }),
+            })
 
-      if (res.status === 400) {
-        // Repositorio no listo
-        const notReadyData = data as Extract<ChatQueryResponse, { status: "idle" | "error" }>
-        setMessages((prev) => {
-          const updated = [...prev]
-          updated[updated.length - 1] = {
-            role: "assistant",
-            content: notReadyData.message,
+            if (controller.signal.aborted) {
+              return
+            }
+
+            const retryData = (await retryRes.json()) as ChatQueryResponse
+
+            // Si sigue siendo 409, mantener el estado de espera pero liberar el flag de envío
+            if (retryRes.status === 409) {
+              // Ya está en estado de espera, liberar el flag pero mantener el estado visual
+              // El usuario puede cancelar manualmente si lo desea
+              isSendingRef.current = false
+              retryTimeoutRef.current = null
+              return
+            }
+
+            // Procesar respuesta exitosa del reintento
+            await processSuccessfulResponse(retryRes, retryData)
+          } catch (retryErr) {
+            if (retryErr instanceof Error && retryErr.name === "AbortError") {
+              return
+            }
+            // Si falla el reintento, mostrar error
+            setMessages((prev) => {
+              const updated = [...prev]
+              updated[updated.length - 1] = {
+                role: "assistant",
+                content: "Error al reintentar la consulta. Por favor, intentá nuevamente.",
+              }
+              return updated
+            })
+            setWaitingForPrevious(false)
+            setIsQueryRunning(false)
+            isSendingRef.current = false
+          } finally {
+            retryTimeoutRef.current = null
           }
-          return updated
-        })
-        setContextFiles([])
-        setProcessingPrevious(false)
+        }, 600)
+
+        // No liberar el estado aquí, se liberará después del reintento o manualmente
+        // Pero liberar el flag de envío para permitir que el usuario pueda cancelar
         isSendingRef.current = false
         return
       }
 
-      if (!res.ok) {
-        throw new Error("Error al consultar el repositorio")
-      }
-
-      // Response 200: success
-      const successData = data as Extract<ChatQueryResponse, { response: string }>
-      
-      // Guardar conversationId si viene en la respuesta
-      if (successData.conversationId) {
-        setConversationId(successData.conversationId)
-      }
-      
-      const contextFiles = successData.sources?.map((source) => ({
-        name: source.path.split("/").pop() || source.path,
-        path: source.path,
-      })) ?? []
-
-      setContextFiles(contextFiles)
-
-      // Guardar información debug del motor LLM si existe
-      if (successData.debug) {
-        setLlmDebug({
-          engine: successData.debug.engine,
-          model: successData.debug.model,
-          location: successData.debug.location,
-        })
-      } else {
-        setLlmDebug(null)
-      }
-
-      setMessages((prev) => {
-        const updated = [...prev]
-        updated[updated.length - 1] = {
-          role: "assistant",
-          content: successData.response,
-        }
-        return updated
-      })
-      
-      setProcessingPrevious(false)
+      // Procesar respuesta exitosa
+      await processSuccessfulResponse(res, data)
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
-        isSendingRef.current = false
         return
+      }
+
+      // Limpiar timeout de reintento si existe
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current)
+        retryTimeoutRef.current = null
       }
 
       setContextFiles([])
-      setProcessingPrevious(false)
+      setWaitingForPrevious(false)
       setMessages((prev) => {
         const updated = [...prev]
         updated[updated.length - 1] = {
@@ -354,16 +378,122 @@ export function ChatInterface() {
         return updated
       })
     } finally {
-      setLoading(false)
+      // Solo liberar isQueryRunning si no hay un reintento pendiente
+      if (!retryTimeoutRef.current) {
+        setIsQueryRunning(false)
+      }
       abortControllerRef.current = null
-      isSendingRef.current = false
+      // isSendingRef se maneja en cada caso específico
     }
+  }
+
+  /* -------------------------------------------
+   * Procesar respuesta exitosa del backend
+   * ------------------------------------------- */
+  const processSuccessfulResponse = async (
+    res: Response,
+    data: ChatQueryResponse
+  ) => {
+    // Limpiar timeout de reintento si existe
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current)
+      retryTimeoutRef.current = null
+    }
+
+    // Según contrato: 200 = success, 202 = indexing, 400 = not ready
+    if (res.status === 202) {
+      // Repositorio indexando
+      const indexingData = data as Extract<ChatQueryResponse, { status: "indexing" }>
+      setMessages((prev) => {
+        const updated = [...prev]
+        updated[updated.length - 1] = {
+          role: "assistant",
+          content: indexingData.message,
+        }
+        return updated
+      })
+      setContextFiles([])
+      setWaitingForPrevious(false)
+      setIsQueryRunning(false)
+      isSendingRef.current = false
+      return
+    }
+
+    if (res.status === 400) {
+      // Repositorio no listo
+      const notReadyData = data as Extract<ChatQueryResponse, { status: "idle" | "error" }>
+      setMessages((prev) => {
+        const updated = [...prev]
+        updated[updated.length - 1] = {
+          role: "assistant",
+          content: notReadyData.message,
+        }
+        return updated
+      })
+      setContextFiles([])
+      setWaitingForPrevious(false)
+      setIsQueryRunning(false)
+      isSendingRef.current = false
+      return
+    }
+
+    if (!res.ok) {
+      throw new Error("Error al consultar el repositorio")
+    }
+
+    // Response 200: success
+    const successData = data as Extract<ChatQueryResponse, { response: string }>
+    
+    // Guardar conversationId si viene en la respuesta
+    if (successData.conversationId) {
+      setConversationId(successData.conversationId)
+    }
+    
+    const contextFiles = successData.sources?.map((source) => ({
+      name: source.path.split("/").pop() || source.path,
+      path: source.path,
+    })) ?? []
+
+    setContextFiles(contextFiles)
+
+    // Guardar información debug del motor LLM si existe
+    if (successData.debug) {
+      setLlmDebug({
+        engine: successData.debug.engine,
+        model: successData.debug.model,
+        location: successData.debug.location,
+      })
+    } else {
+      setLlmDebug(null)
+    }
+
+    setMessages((prev) => {
+      const updated = [...prev]
+      updated[updated.length - 1] = {
+        role: "assistant",
+        content: successData.response,
+      }
+      return updated
+    })
+    
+    setWaitingForPrevious(false)
+    setIsQueryRunning(false)
+    isSendingRef.current = false
   }
 
   /* -------------------------------------------
    * Keybindings
    * ------------------------------------------- */
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Prevenir envío si ya hay una consulta en curso
+    if (isQueryRunning || isSendingRef.current) {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+      return
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
       e.stopPropagation()
@@ -403,11 +533,11 @@ export function ChatInterface() {
             const thinking =
               msg.role === "assistant" &&
               msg.content === "Pensando..." &&
-              loading
-            const processingPrev =
+              isQueryRunning
+            const waitingPrev =
               msg.role === "assistant" &&
-              msg.content === "Procesando respuesta anterior…" &&
-              processingPrevious
+              msg.content === "Esperando que termine la consulta anterior…" &&
+              waitingForPrevious
 
             return (
               <div
@@ -419,7 +549,7 @@ export function ChatInterface() {
                 {msg.role === "assistant" && (
                   <Avatar className="h-8 w-8 bg-primary">
                     <AvatarFallback>
-                      {(thinking || processingPrev) ? (
+                      {(thinking || waitingPrev) ? (
                         <Spinner className="h-4 w-4 text-primary-foreground" />
                       ) : (
                         <Bot className="h-4 w-4 text-primary-foreground" />
@@ -434,10 +564,10 @@ export function ChatInterface() {
                       <Spinner className="h-4 w-4" />
                       <span className="italic">Pensando...</span>
                     </div>
-                  ) : processingPrev ? (
+                  ) : waitingPrev ? (
                     <div className="flex gap-2 items-center">
                       <Spinner className="h-4 w-4" />
-                      <span className="italic">Procesando respuesta anterior…</span>
+                      <span className="italic">Esperando que termine la consulta anterior…</span>
                     </div>
                   ) : (
                     msg.content
@@ -466,15 +596,23 @@ export function ChatInterface() {
             {status === "error" && (error || "Error en el repositorio")}
           </div>
         )}
-        {processingPrevious && (
-          <div className="mb-2 text-sm text-muted-foreground">
-            Procesando respuesta anterior…
+        {isQueryRunning && (
+          <div className="mb-2 text-sm text-muted-foreground flex items-center gap-2">
+            <Spinner className="h-3 w-3" />
+            <span>
+              {waitingForPrevious
+                ? "Esperando que termine la consulta anterior…"
+                : "Procesando consulta…"}
+            </span>
           </div>
         )}
         <form
           onSubmit={(e) => {
             e.preventDefault()
-            handleSend()
+            // Prevenir envío si ya hay una consulta en curso
+            if (!isQueryRunning && !isSendingRef.current) {
+              handleSend()
+            }
           }}
           className="flex gap-2 items-end"
         >
@@ -483,13 +621,17 @@ export function ChatInterface() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Pregunta sobre el repositorio…"
-            disabled={loading || processingPrevious || !canChat}
+            placeholder={
+              isQueryRunning
+                ? "Esperando respuesta…"
+                : "Pregunta sobre el repositorio…"
+            }
+            disabled={isQueryRunning || !canChat}
             rows={1}
             className="resize-none"
           />
 
-          {loading ? (
+          {isQueryRunning ? (
             <Button
               type="button"
               size="icon"
@@ -499,7 +641,11 @@ export function ChatInterface() {
               <X className="h-4 w-4" />
             </Button>
           ) : (
-            <Button type="submit" size="icon" disabled={!input.trim() || processingPrevious || !canChat}>
+            <Button
+              type="submit"
+              size="icon"
+              disabled={!input.trim() || isQueryRunning || !canChat}
+            >
               <Send className="h-4 w-4" />
             </Button>
           )}
