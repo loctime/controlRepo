@@ -76,8 +76,8 @@ export function ChatInterface() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
-  const isSendingRef = useRef(false)
-  const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  // Estado síncrono global para prevenir envíos simultáneos
+  const isQueryRunningRef = useRef(false)
 
   /* -------------------------------------------
    * Auto scroll
@@ -173,23 +173,8 @@ export function ChatInterface() {
     setConversationId(undefined)
     setWaitingForPrevious(false)
     setIsQueryRunning(false)
-    // Limpiar timeout de reintento si existe
-    if (retryTimeoutRef.current) {
-      clearTimeout(retryTimeoutRef.current)
-      retryTimeoutRef.current = null
-    }
+    isQueryRunningRef.current = false
   }, [repositoryId])
-
-  /* -------------------------------------------
-   * Limpiar timeout al desmontar
-   * ------------------------------------------- */
-  useEffect(() => {
-    return () => {
-      if (retryTimeoutRef.current) {
-        clearTimeout(retryTimeoutRef.current)
-      }
-    }
-  }, [])
 
   /* -------------------------------------------
    * Cancelar request
@@ -198,19 +183,13 @@ export function ChatInterface() {
     abortControllerRef.current?.abort()
     abortControllerRef.current = null
     
-    // Limpiar timeout de reintento si existe
-    if (retryTimeoutRef.current) {
-      clearTimeout(retryTimeoutRef.current)
-      retryTimeoutRef.current = null
-    }
-    
     setIsQueryRunning(false)
     setWaitingForPrevious(false)
-    isSendingRef.current = false
+    isQueryRunningRef.current = false
 
     setMessages((prev) => {
       const last = prev[prev.length - 1]
-      if (last?.role === "assistant" && (last.content === "Pensando..." || last.content === "Esperando que termine la consulta anterior…")) {
+      if (last?.role === "assistant" && (last.content === "Pensando..." || last.content === "Consulta en curso…")) {
         return prev.slice(0, -1)
       }
       return prev
@@ -221,13 +200,18 @@ export function ChatInterface() {
    * Enviar pregunta
    * ------------------------------------------- */
   const handleSend = async () => {
-    // Prevenir múltiples envíos simultáneos
-    if (!input.trim() || isQueryRunning || !canChat || isSendingRef.current) {
+    // Verificación síncrona CRÍTICA: prevenir múltiples envíos simultáneos
+    if (isQueryRunningRef.current) {
       return
     }
 
-    // Establecer flag ANTES de cualquier otra operación para prevenir doble envío
-    isSendingRef.current = true
+    // Validaciones adicionales
+    if (!input.trim() || !canChat) {
+      return
+    }
+
+    // Establecer flag síncrono ANTES de cualquier otra operación
+    isQueryRunningRef.current = true
     setIsQueryRunning(true)
     setWaitingForPrevious(false)
 
@@ -241,7 +225,7 @@ export function ChatInterface() {
         },
       ])
       setIsQueryRunning(false)
-      isSendingRef.current = false
+      isQueryRunningRef.current = false
       return
     }
 
@@ -275,79 +259,18 @@ export function ChatInterface() {
 
       const data = (await res.json()) as ChatQueryResponse
 
-      // Manejar 409: lock activo, no es un error - estado esperado
+      // Manejar 409: lock activo - NO reintentar automáticamente
       if (res.status === 409) {
         setWaitingForPrevious(true)
         setMessages((prev) => {
           const updated = [...prev]
           updated[updated.length - 1] = {
             role: "assistant",
-            content: "Esperando que termine la consulta anterior…",
+            content: "Consulta en curso…",
           }
           return updated
         })
         setContextFiles([])
-        
-        // Reintentar automáticamente una sola vez después de 600ms
-        retryTimeoutRef.current = setTimeout(async () => {
-          // Verificar que no se canceló
-          if (controller.signal.aborted) {
-            return
-          }
-          
-          try {
-            const retryRes = await fetch("/api/chat", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              signal: controller.signal,
-              body: JSON.stringify({
-                repositoryId,
-                question,
-                ...(conversationId && { conversationId }),
-              }),
-            })
-
-            if (controller.signal.aborted) {
-              return
-            }
-
-            const retryData = (await retryRes.json()) as ChatQueryResponse
-
-            // Si sigue siendo 409, mantener el estado de espera pero liberar el flag de envío
-            if (retryRes.status === 409) {
-              // Ya está en estado de espera, liberar el flag pero mantener el estado visual
-              // El usuario puede cancelar manualmente si lo desea
-              isSendingRef.current = false
-              retryTimeoutRef.current = null
-              return
-            }
-
-            // Procesar respuesta exitosa del reintento
-            await processSuccessfulResponse(retryRes, retryData)
-          } catch (retryErr) {
-            if (retryErr instanceof Error && retryErr.name === "AbortError") {
-              return
-            }
-            // Si falla el reintento, mostrar error
-            setMessages((prev) => {
-              const updated = [...prev]
-              updated[updated.length - 1] = {
-                role: "assistant",
-                content: "Error al reintentar la consulta. Por favor, intentá nuevamente.",
-              }
-              return updated
-            })
-            setWaitingForPrevious(false)
-            setIsQueryRunning(false)
-            isSendingRef.current = false
-          } finally {
-            retryTimeoutRef.current = null
-          }
-        }, 600)
-
-        // No liberar el estado aquí, se liberará después del reintento o manualmente
-        // Pero liberar el flag de envío para permitir que el usuario pueda cancelar
-        isSendingRef.current = false
         return
       }
 
@@ -356,12 +279,6 @@ export function ChatInterface() {
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
         return
-      }
-
-      // Limpiar timeout de reintento si existe
-      if (retryTimeoutRef.current) {
-        clearTimeout(retryTimeoutRef.current)
-        retryTimeoutRef.current = null
       }
 
       setContextFiles([])
@@ -378,12 +295,11 @@ export function ChatInterface() {
         return updated
       })
     } finally {
-      // Solo liberar isQueryRunning si no hay un reintento pendiente
-      if (!retryTimeoutRef.current) {
-        setIsQueryRunning(false)
-      }
+      // SIEMPRE liberar el lock: el backend ya controla la exclusión
+      // El frontend solo previene doble click/Enter locales
+      setIsQueryRunning(false)
+      isQueryRunningRef.current = false
       abortControllerRef.current = null
-      // isSendingRef se maneja en cada caso específico
     }
   }
 
@@ -394,12 +310,6 @@ export function ChatInterface() {
     res: Response,
     data: ChatQueryResponse
   ) => {
-    // Limpiar timeout de reintento si existe
-    if (retryTimeoutRef.current) {
-      clearTimeout(retryTimeoutRef.current)
-      retryTimeoutRef.current = null
-    }
-
     // Según contrato: 200 = success, 202 = indexing, 400 = not ready
     if (res.status === 202) {
       // Repositorio indexando
@@ -415,7 +325,7 @@ export function ChatInterface() {
       setContextFiles([])
       setWaitingForPrevious(false)
       setIsQueryRunning(false)
-      isSendingRef.current = false
+      isQueryRunningRef.current = false
       return
     }
 
@@ -433,7 +343,7 @@ export function ChatInterface() {
       setContextFiles([])
       setWaitingForPrevious(false)
       setIsQueryRunning(false)
-      isSendingRef.current = false
+      isQueryRunningRef.current = false
       return
     }
 
@@ -478,15 +388,15 @@ export function ChatInterface() {
     
     setWaitingForPrevious(false)
     setIsQueryRunning(false)
-    isSendingRef.current = false
+    isQueryRunningRef.current = false
   }
 
   /* -------------------------------------------
    * Keybindings
    * ------------------------------------------- */
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Prevenir envío si ya hay una consulta en curso
-    if (isQueryRunning || isSendingRef.current) {
+    // Verificación síncrona: prevenir envío si ya hay una consulta en curso
+    if (isQueryRunningRef.current) {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault()
         e.stopPropagation()
@@ -494,11 +404,14 @@ export function ChatInterface() {
       return
     }
 
+    // Enter sin Shift: enviar mensaje
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
       e.stopPropagation()
       handleSend()
-    } else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+    }
+    // Ctrl/Cmd + Enter: también enviar (compatibilidad)
+    else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault()
       e.stopPropagation()
       handleSend()
@@ -536,7 +449,7 @@ export function ChatInterface() {
               isQueryRunning
             const waitingPrev =
               msg.role === "assistant" &&
-              msg.content === "Esperando que termine la consulta anterior…" &&
+              msg.content === "Consulta en curso…" &&
               waitingForPrevious
 
             return (
@@ -567,7 +480,7 @@ export function ChatInterface() {
                   ) : waitingPrev ? (
                     <div className="flex gap-2 items-center">
                       <Spinner className="h-4 w-4" />
-                      <span className="italic">Esperando que termine la consulta anterior…</span>
+                      <span className="italic">Consulta en curso…</span>
                     </div>
                   ) : (
                     msg.content
@@ -601,7 +514,7 @@ export function ChatInterface() {
             <Spinner className="h-3 w-3" />
             <span>
               {waitingForPrevious
-                ? "Esperando que termine la consulta anterior…"
+                ? "Consulta en curso…"
                 : "Procesando consulta…"}
             </span>
           </div>
@@ -609,8 +522,8 @@ export function ChatInterface() {
         <form
           onSubmit={(e) => {
             e.preventDefault()
-            // Prevenir envío si ya hay una consulta en curso
-            if (!isQueryRunning && !isSendingRef.current) {
+            // Verificación síncrona: prevenir envío si ya hay una consulta en curso
+            if (!isQueryRunningRef.current) {
               handleSend()
             }
           }}
@@ -623,7 +536,7 @@ export function ChatInterface() {
             onKeyDown={handleKeyDown}
             placeholder={
               isQueryRunning
-                ? "Esperando respuesta…"
+                ? "Procesando consulta…"
                 : "Pregunta sobre el repositorio…"
             }
             disabled={isQueryRunning || !canChat}
@@ -644,7 +557,7 @@ export function ChatInterface() {
             <Button
               type="submit"
               size="icon"
-              disabled={!input.trim() || isQueryRunning || !canChat}
+              disabled={!input.trim() || isQueryRunningRef.current || !canChat}
             >
               <Send className="h-4 w-4" />
             </Button>
