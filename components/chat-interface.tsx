@@ -258,7 +258,7 @@ export function ChatInterface() {
     abortControllerRef.current = controller
 
     try {
-      const res = await fetch("/api/chat/query", {
+      const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
@@ -296,7 +296,7 @@ export function ChatInterface() {
           }
           
           try {
-            const retryRes = await fetch("/api/chat/query", {
+            const retryRes = await fetch("/api/chat", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               signal: controller.signal,

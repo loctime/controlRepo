@@ -445,7 +445,7 @@ function formatMetricsForContext(metrics: RepositoryMetrics | null): string {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { question, repositoryId, role, conversationMemory } = body
+    const { question, repositoryId, role, conversationMemory, conversationId } = body
     
     // Determinar el rol del asistente (por defecto: architecture-explainer)
     const assistantRole: AssistantRole = role && (role === "architecture-explainer" || role === "structure-auditor")
@@ -658,13 +658,9 @@ Main Languages: ${mainLanguages}
       const formattedAnswer = enforceOutputFormat(cleanedAnswer.trim(), true)
       
       return NextResponse.json({
-        answer: formattedAnswer,
-        files: [],
-        sourcesDeclared: false,
-        findings: {
-          improvements: [],
-          risks: [],
-        },
+        response: formattedAnswer, // Frontend espera "response" no "answer"
+        ...(conversationId && { conversationId }), // Mantener conversationId si se envió
+        sources: [],
         debug: {
           engine: "Ollama",
           model: "phi3:mini",
@@ -761,14 +757,18 @@ Main Languages: ${mainLanguages}
       // NO agregar fuentes que no existen en el índice - descartarlas silenciosamente
     })
 
+    // Formatear sources para compatibilidad con frontend
+    // El frontend espera: sources: Array<{ path: string, lines: [number, number] }>
+    // Por ahora, devolvemos solo path (sin líneas específicas)
+    const sources = declaredFiles.map(file => ({
+      path: file.path,
+      lines: [1, 1] as [number, number], // Placeholder - el frontend puede ignorar esto
+    }))
+
     return NextResponse.json({
-      answer: formattedAnswer,
-      files: declaredFiles.length > 0 ? declaredFiles : [],
-      sourcesDeclared: validSources.length > 0,
-      findings: {
-        improvements: findings.improvements,
-        risks: findings.risks,
-      },
+      response: formattedAnswer, // Frontend espera "response" no "answer"
+      ...(conversationId && { conversationId }), // Mantener conversationId si se envió
+      sources: sources.length > 0 ? sources : [],
       debug: {
         engine: "Ollama",
         model: "phi3:mini",
