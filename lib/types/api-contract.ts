@@ -74,3 +74,14 @@ export type ChatQueryResponse =
   | ChatQueryResponseSuccess
   | ChatQueryResponseIndexing
   | ChatQueryResponseNotReady
+
+// ============================================
+// GET /chat/status
+// ============================================
+
+export interface LLMStatusResponse {
+  ok: boolean
+  provider?: string // ej: "ollama"
+  model?: string // ej: "llama3"
+  error?: string
+}

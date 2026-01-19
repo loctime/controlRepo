@@ -8,6 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Send, Bot, User, X } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { ContextPanel } from "./context-panel"
+import { LLMStatusIndicator } from "./llm-status-indicator"
 import { useRepository } from "@/lib/repository-context"
 import { useContextFiles } from "@/lib/context-files-context"
 import { Spinner } from "@/components/ui/spinner"
@@ -378,7 +379,10 @@ export function ChatInterface() {
     <Card className="h-full flex flex-col gap-0">
       <div className="border-b px-3 py-2 flex justify-between items-center">
         <div>
-          <h2 className="font-semibold">Chat del Repositorio</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="font-semibold">Chat del Repositorio</h2>
+            <LLMStatusIndicator />
+          </div>
           <p className="text-xs text-muted-foreground">
             Modo lectura • Respuestas verificables
           </p>
