@@ -4,10 +4,24 @@ import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Plus, Loader2, AlertCircle, GitBranch, RefreshCw } from "lucide-react"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  Plus,
+  Loader2,
+  AlertCircle,
+  GitBranch,
+  RefreshCw,
+} from "lucide-react"
 import { useRepository } from "@/lib/repository-context"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { AddRepositoryInline } from "./add-repository-inline"
+import { GitHubRepoSelector } from "./github-repo-selector"
 
 export function HeaderRepository() {
   const { repositoryId, status, loading, indexRepository, error: repoError } =
@@ -15,6 +29,8 @@ export function HeaderRepository() {
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [reindexing, setReindexing] = useState(false)
+  
+
 
   // Parsear repositoryId para obtener owner/repo
   const parsedRepo = repositoryId
@@ -24,6 +40,7 @@ export function HeaderRepository() {
       })()
     : null
 
+  
   /* =======================
      Handlers
   ======================= */
@@ -55,12 +72,16 @@ export function HeaderRepository() {
 
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="font-mono text-xs truncate px-2 py-1 rounded-md border bg-muted/30">
+              <button
+                onClick={() => setGithubSelectorOpen(true)}
+                className="font-mono text-xs truncate px-2 py-1 rounded-md border bg-muted/30 hover:bg-muted/50 cursor-pointer transition-colors"
+              >
                 {repositoryDisplay}
-              </span>
+              </button>
             </TooltipTrigger>
             <TooltipContent>
               <p className="font-mono">{repositoryDisplay}</p>
+              <p className="text-xs mt-1">Click para seleccionar otro repositorio</p>
             </TooltipContent>
           </Tooltip>
 
@@ -146,7 +167,9 @@ export function HeaderRepository() {
                   Indexar
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Indexar repositorio</TooltipContent>
+              <TooltipContent>
+                Indexar repositorio
+              </TooltipContent>
             </Tooltip>
           )}
 
@@ -156,9 +179,7 @@ export function HeaderRepository() {
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => {
-                    indexRepository(repositoryId, true)
-                  }}
+                  onClick={() => indexRepository(repositoryId, true)}
                   disabled={loading || reindexing}
                   className="h-6 text-xs gap-1"
                 >
@@ -170,7 +191,9 @@ export function HeaderRepository() {
                   Reintentar
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Reintentar indexación</TooltipContent>
+              <TooltipContent>
+                Reintentar indexación
+              </TooltipContent>
             </Tooltip>
           )}
 
