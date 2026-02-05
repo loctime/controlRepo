@@ -66,6 +66,7 @@ export function ChatInterface() {
     model?: string
     location?: string
   } | null>(null)
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   const { repositoryId, preferencesLoaded, status, error } = useRepository()
   const { setContextFiles } = useContextFiles()
@@ -78,6 +79,8 @@ export function ChatInterface() {
   const abortControllerRef = useRef<AbortController | null>(null)
   // Estado síncrono global para prevenir envíos simultáneos
   const isQueryRunningRef = useRef(false)
+  // Referencia para controlar el polling de estado
+  const isPollingRef = useRef(false)
 
   /* -------------------------------------------
    * Auto scroll
@@ -174,7 +177,25 @@ export function ChatInterface() {
     setWaitingForPrevious(false)
     setIsQueryRunning(false)
     isQueryRunningRef.current = false
+    
+    // Limpiar polling al cambiar de repositorio
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current)
+      pollingIntervalRef.current = null
+    }
+    isPollingRef.current = false
   }, [repositoryId])
+
+  /* -------------------------------------------
+   * Cleanup al desmontar el componente
+   * ------------------------------------------- */
+  useEffect(() => {
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+      }
+    }
+  }, [])
 
   /* -------------------------------------------
    * Cancelar request
@@ -187,6 +208,13 @@ export function ChatInterface() {
     setWaitingForPrevious(false)
     isQueryRunningRef.current = false
 
+    // Limpiar polling al cancelar
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current)
+      pollingIntervalRef.current = null
+    }
+    isPollingRef.current = false
+
     setMessages((prev) => {
       const last = prev[prev.length - 1]
       if (last?.role === "assistant" && (last.content === "Pensando..." || last.content === "Consulta en curso…")) {
@@ -194,6 +222,77 @@ export function ChatInterface() {
       }
       return prev
     })
+  }
+
+  /* -------------------------------------------
+   * Polling al endpoint /api/chat/status
+   * ------------------------------------------- */
+  const startStatusPolling = () => {
+    if (isPollingRef.current) {
+      return // Evitar múltiples polls simultáneos
+    }
+    
+    isPollingRef.current = true
+    
+    const pollStatus = async () => {
+      try {
+        const res = await fetch("/api/chat/status")
+        
+        if (!res.ok) {
+          console.warn("Error consultando status:", res.status)
+          return
+        }
+        
+        const data = await res.json()
+        
+        // El endpoint devuelve { ok: boolean, status?: string, error?: string }
+        // Si ok es true o hay status, consideramos que no hay procesamiento
+        if (data.ok || (data.status && data.status !== "processing")) {
+          stopStatusPolling()
+          
+          // Rehabilitar el chat
+          setWaitingForPrevious(false)
+          setIsQueryRunning(false)
+          isQueryRunningRef.current = false
+          
+          // Actualizar mensaje para indicar que se puede continuar
+          setMessages((prev) => {
+            const updated = [...prev]
+            const last = updated[updated.length - 1]
+            if (last?.role === "assistant" && last.content === "Consulta en curso…") {
+              updated[updated.length - 1] = {
+                role: "assistant",
+                content: data.error 
+                  ? "Hubo un error en la consulta anterior. Podés intentar nuevamente."
+                  : "Consulta anterior finalizada. Podés enviar una nueva pregunta."
+              }
+            }
+            return updated
+          })
+        }
+      } catch (error) {
+        console.error("Error en polling de status:", error)
+        // En caso de error de red, detener el polling para evitar loops
+        stopStatusPolling()
+        setWaitingForPrevious(false)
+        setIsQueryRunning(false)
+        isQueryRunningRef.current = false
+      }
+    }
+    
+    // Polling cada 2 segundos
+    pollingIntervalRef.current = setInterval(pollStatus, 2000)
+    
+    // Ejecutar inmediatamente la primera consulta
+    pollStatus()
+  }
+  
+  const stopStatusPolling = () => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current)
+      pollingIntervalRef.current = null
+    }
+    isPollingRef.current = false
   }
 
   /* -------------------------------------------
@@ -259,7 +358,7 @@ export function ChatInterface() {
 
       const data = (await res.json()) as ChatQueryResponse
 
-      // Manejar 409: lock activo - NO reintentar automáticamente
+      // Manejar 409: lock activo - iniciar polling para esperar desbloqueo
       if (res.status === 409) {
         setWaitingForPrevious(true)
         setMessages((prev) => {
@@ -271,6 +370,9 @@ export function ChatInterface() {
           return updated
         })
         setContextFiles([])
+        
+        // Iniciar polling para monitorear cuándo se desbloquea
+        startStatusPolling()
         return
       }
 
@@ -295,10 +397,13 @@ export function ChatInterface() {
         return updated
       })
     } finally {
-      // SIEMPRE liberar el lock: el backend ya controla la exclusión
+      // SIEMPRE liberar el lock de envío: el backend ya controla la exclusión
       // El frontend solo previene doble click/Enter locales
-      setIsQueryRunning(false)
-      isQueryRunningRef.current = false
+      // PERO mantener el estado si hay polling activo (caso 409)
+      if (!isPollingRef.current) {
+        setIsQueryRunning(false)
+        isQueryRunningRef.current = false
+      }
       abortControllerRef.current = null
     }
   }
@@ -326,6 +431,8 @@ export function ChatInterface() {
       setWaitingForPrevious(false)
       setIsQueryRunning(false)
       isQueryRunningRef.current = false
+      // Detener cualquier polling activo
+      stopStatusPolling()
       return
     }
 
@@ -344,6 +451,8 @@ export function ChatInterface() {
       setWaitingForPrevious(false)
       setIsQueryRunning(false)
       isQueryRunningRef.current = false
+      // Detener cualquier polling activo
+      stopStatusPolling()
       return
     }
 
@@ -389,6 +498,8 @@ export function ChatInterface() {
     setWaitingForPrevious(false)
     setIsQueryRunning(false)
     isQueryRunningRef.current = false
+    // Detener cualquier polling activo
+    stopStatusPolling()
   }
 
   /* -------------------------------------------
