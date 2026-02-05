@@ -8,7 +8,6 @@ import { generateMinimalProjectBrain } from "@/lib/project-brain/generator"
 import { saveProjectBrain } from "@/lib/project-brain/storage-filesystem"
 import { generateMetrics } from "@/lib/repository/metrics/generator"
 import { saveMetrics } from "@/lib/repository/metrics/storage-filesystem"
-import { getAuthenticatedUserId } from "@/lib/auth/server-auth"
 
 /**
  * POST /api/repository/reindex
@@ -16,18 +15,6 @@ import { getAuthenticatedUserId } from "@/lib/auth/server-auth"
  */
 export async function POST(request: NextRequest) {
   try {
-    // Autenticación: Verificar token Firebase y obtener UID
-    let uid: string
-    try {
-      uid = await getAuthenticatedUserId(request)
-    } catch (error) {
-      console.error("[REINDEX] Error de autenticación:", error)
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : "No autorizado" },
-        { status: 401 }
-      )
-    }
-
     const body = await request.json()
     const { owner, repo, branch } = body
 

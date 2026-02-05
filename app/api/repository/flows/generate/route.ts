@@ -12,7 +12,6 @@ import { generateFlows } from "@/lib/repository/flows/generator"
 import { saveFlows, getFlows } from "@/lib/repository/flows/storage-filesystem"
 import { createRepositoryId } from "@/lib/repository/utils"
 import { resolveRepositoryBranch } from "@/lib/github/client"
-import { getAuthenticatedUserId } from "@/lib/auth/server-auth"
 
 /**
  * POST /api/repository/flows/generate
@@ -20,18 +19,6 @@ import { getAuthenticatedUserId } from "@/lib/auth/server-auth"
  */
 export async function POST(request: NextRequest) {
   try {
-    // Autenticación: Verificar token Firebase y obtener UID
-    let uid: string
-    try {
-      uid = await getAuthenticatedUserId(request)
-    } catch (error) {
-      console.error("[FLOWS] Error de autenticación:", error)
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : "No autorizado" },
-        { status: 401 }
-      )
-    }
-
     const body = await request.json()
     const { owner, repo, branch } = body
 
@@ -119,18 +106,6 @@ export async function POST(request: NextRequest) {
  */
 export async function GET(request: NextRequest) {
   try {
-    // Autenticación: Verificar token Firebase y obtener UID
-    let uid: string
-    try {
-      uid = await getAuthenticatedUserId(request)
-    } catch (error) {
-      console.error("[FLOWS] Error de autenticación:", error)
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : "No autorizado" },
-        { status: 401 }
-      )
-    }
-
     const { searchParams } = new URL(request.url)
     const owner = searchParams.get("owner")
     const repo = searchParams.get("repo")

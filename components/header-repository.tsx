@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -24,11 +24,10 @@ import { AddRepositoryInline } from "./add-repository-inline"
 import { GitHubRepoSelector } from "./github-repo-selector"
 
 export function HeaderRepository() {
-  const { repositoryId, status, loading, statusData, indexRepository, refreshStatus, error: repoError } =
+  const { repositoryId, status, loading, indexRepository, error: repoError } =
     useRepository()
 
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [githubSelectorOpen, setGithubSelectorOpen] = useState(false)
   const [reindexing, setReindexing] = useState(false)
   
 
@@ -53,16 +52,6 @@ export function HeaderRepository() {
     } finally {
       setReindexing(false)
     }
-  }
-
-  const handleSelectGitHubRepo = async (repo: {
-    owner: string
-    repo: string
-    branch: string
-  }) => {
-    // Construir repositoryId según contrato: github:owner:repo
-    const repoId = `github:${repo.owner}:${repo.repo}`
-    await indexRepository(repoId)
   }
 
   const repositoryDisplay = parsedRepo
@@ -229,11 +218,6 @@ export function HeaderRepository() {
         onClose={() => setDialogOpen(false)}
       />
 
-      <GitHubRepoSelector
-        isOpen={githubSelectorOpen}
-        onClose={() => setGithubSelectorOpen(false)}
-        onSelect={handleSelectGitHubRepo}
-      />
     </div>
   )
 }

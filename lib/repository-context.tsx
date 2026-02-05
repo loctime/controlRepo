@@ -1,8 +1,6 @@
 "use client"
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from "react"
-import { useAuth } from "./auth-context"
-import { getAuth } from "firebase/auth"
 import { toast } from "sonner"
 import type {
   IndexRepositoryRequest,
@@ -46,7 +44,6 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [statusData, setStatusData] = useState<RepositoryContextType["statusData"]>(null)
-  const { user } = useAuth()
   const [preferencesLoaded, setPreferencesLoaded] = useState(false)
 
   // Ref para almacenar información del polling
@@ -74,38 +71,25 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
    */
   const updateUserPreferences = useCallback(
     async (activeRepositoryId: string | null) => {
-      if (!user?.uid) return
+      if (typeof window === "undefined") return
 
       try {
-        const auth = getAuth()
-        const currentUser = auth.currentUser
-        if (!currentUser) {
-          return
+        if (activeRepositoryId) {
+          localStorage.setItem("controlrepo.activeRepositoryId", activeRepositoryId)
+        } else {
+          localStorage.removeItem("controlrepo.activeRepositoryId")
         }
-
-        const token = await currentUser.getIdToken()
-
-        await fetch("/api/user/preferences", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            activeRepositoryId,
-          }),
-        })
       } catch (err) {
         console.error("Error al actualizar preferencias de usuario:", err)
       }
     },
-    [user?.uid]
+    []
   )
 
-  // Resetear preferencesLoaded cuando el usuario cambia
+  // Resetear preferencesLoaded al montar
   useEffect(() => {
     setPreferencesLoaded(false)
-  }, [user?.uid])
+  }, [])
 
   /**
    * Detiene el polling activo
@@ -286,15 +270,6 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
       setStatusData(null)
 
       try {
-        const auth = getAuth()
-        const currentUser = auth.currentUser
-
-        if (!currentUser) {
-          throw new Error("No hay usuario autenticado. Por favor, inicia sesión.")
-        }
-
-        const token = await currentUser.getIdToken()
-
         // El backend maneja el acceso público y el fallback con token de entorno
         const requestBody: IndexRepositoryRequest = {
           repositoryId: repoId,
@@ -314,7 +289,6 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              "Authorization": `Bearer ${token}`,
             },
             body: JSON.stringify(requestBody),
             signal: controller.signal,
@@ -359,8 +333,8 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
         // Si está indexing, iniciar polling
         if (data.status === "indexing") {
           startPolling(data.repositoryId)
-        } else if (data.status === "completed" || data.status === "ready") {
-          // Si ya está completed/ready, refrescar status para obtener stats
+        } else if (data.status === "completed") {
+          // Si ya está completed, refrescar status para obtener stats
           await refreshStatus(data.repositoryId)
           await updateUserPreferences(data.repositoryId)
         }
@@ -526,35 +500,13 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
    * Restaura el repositorio activo desde las preferencias del usuario
    */
   useEffect(() => {
-    if (!user?.uid || preferencesLoaded) return
+    if (preferencesLoaded) return
 
     const restoreActiveRepository = async () => {
       try {
-        const auth = getAuth()
-        const currentUser = auth.currentUser
-        if (!currentUser) {
-          setPreferencesLoaded(true)
-          return
-        }
-
-        const token = await currentUser.getIdToken()
-
-        const response = await fetch("/api/user/preferences", {
-          headers: {
-            "Authorization": `Bearer ${token}`,
-          },
-        })
-        
-        if (!response.ok) {
-          setPreferencesLoaded(true)
-          return
-        }
-
-        const preferences = await response.json()
-        if (preferences.activeRepositoryId) {
-          const repoId = preferences.activeRepositoryId
-          // Validar formato
-          if (repoId && typeof repoId === "string" && repoId.startsWith("github:")) {
+        if (typeof window !== "undefined") {
+          const repoId = localStorage.getItem("controlrepo.activeRepositoryId")
+          if (repoId && repoId.startsWith("github:")) {
             await refreshStatus(repoId)
           }
         }
@@ -566,7 +518,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
     }
 
     restoreActiveRepository()
-  }, [user?.uid, preferencesLoaded, refreshStatus])
+  }, [preferencesLoaded, refreshStatus])
 
   const value: RepositoryContextType = {
     repositoryId,

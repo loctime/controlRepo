@@ -33,7 +33,7 @@ force=true fuerza reindexación
 Response — 200
 {
   "repositoryId": "github:owner:repo",
-  "status": "indexing" | "ready",
+  "status": "indexing" | "completed",
   "message": "Indexación iniciada" | "Repositorio ya indexado"
 }
 
@@ -49,7 +49,7 @@ Obtiene el estado real del repositorio.
 Response — 200 (SIEMPRE)
 {
   "repositoryId": "github:owner:repo",
-  "status": "idle" | "indexing" | "ready" | "error",
+  "status": "idle" | "indexing" | "completed" | "error",
   "indexedAt": "2026-01-08T22:03:19Z",
   "stats": {
     "totalFiles": 113,
@@ -65,7 +65,7 @@ Si el repo no existe → status: "idle"
 
 Nunca devuelve 404
 
-stats solo existe si está ready
+stats solo existe si está completed
 
 3️⃣ POST /chat/query
 
@@ -122,8 +122,8 @@ Metadata interna
 
 El backend siempre dice la verdad
 
-Si status === ready → se puede chatear
+Si status === completed → se puede chatear
 
-Si status !== ready → mostrar UX correspondiente
+Si status !== completed → mostrar UX correspondiente
 
 No hay estados ocultos
