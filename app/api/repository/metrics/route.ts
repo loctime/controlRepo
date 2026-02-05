@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
+import { getRepositoryIndex } from "@/lib/repository/storage-filesystem"
+import { getMetrics } from "@/lib/repository/metrics/storage-filesystem"
+import { createRepositoryId } from "@/lib/repository/utils"
 
 /**
  * GET /api/repository/metrics
- * Proxy que consulta las métricas del repositorio desde ControlFile (Render)
- * 
- * Las métricas se almacenan en el backend de Render, no en Vercel.
- * Este endpoint actúa como proxy para consultar las métricas desde el backend correcto.
+ * Lee métricas desde el filesystem local.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -14,7 +14,6 @@ export async function GET(request: NextRequest) {
     const repo = searchParams.get("repo")
     const branch = searchParams.get("branch")
 
-    // Validar parámetros
     if (!owner || !repo) {
       return NextResponse.json(
         { error: "owner y repo son requeridos" },
@@ -22,53 +21,27 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Construir URL del backend de Render
-    const controlFileUrl = process.env.CONTROLFILE_URL || process.env.NEXT_PUBLIC_CONTROLFILE_URL
-    if (!controlFileUrl) {
-      console.error("[METRICS] CONTROLFILE_URL no configurada")
+    const repositoryId = branch
+      ? createRepositoryId(owner, repo, branch)
+      : `github:${owner}:${repo}`
+
+    const index = await getRepositoryIndex(repositoryId)
+    if (!index) {
       return NextResponse.json(
-        { error: "Configuración del backend no disponible" },
-        { status: 500 }
+        { error: "No existe índice local para este repositorio" },
+        { status: 404 }
       )
     }
 
-    // Construir query string para el backend
-    const queryParams = new URLSearchParams({
-      owner,
-      repo,
-    })
-    if (branch) {
-      queryParams.append("branch", branch)
-    }
-
-    const backendUrl = `${controlFileUrl}/api/repository/metrics?${queryParams.toString()}`
-    console.log(`[METRICS] Consultando backend: ${backendUrl}`)
-
-    try {
-      const backendResponse = await fetch(backendUrl, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      })
-
-      const responseData = await backendResponse.json()
-      console.log(`[METRICS] Respuesta del backend: ${backendResponse.status}`)
-
-      // Retornar respuesta del backend (incluyendo 404 si no hay métricas)
-      return NextResponse.json(responseData, {
-        status: backendResponse.status,
-      })
-    } catch (fetchError) {
-      console.error("[METRICS] Error al comunicarse con ControlFile:", fetchError)
+    const metrics = await getMetrics(index.id)
+    if (!metrics) {
       return NextResponse.json(
-        {
-          error: "Error al comunicarse con el backend de indexación",
-          details: fetchError instanceof Error ? fetchError.message : "Error desconocido",
-        },
-        { status: 502 }
+        { error: "No hay métricas disponibles para este repositorio" },
+        { status: 404 }
       )
     }
+
+    return NextResponse.json(metrics)
   } catch (error) {
     console.error("Error en GET /api/repository/metrics:", error)
     return NextResponse.json(

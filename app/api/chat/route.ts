@@ -438,6 +438,25 @@ function formatMetricsForContext(metrics: RepositoryMetrics | null): string {
   return parts.join("\n")
 }
 
+async function ensureOllamaAvailable(): Promise<void> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 3000)
+
+  try {
+    const response = await fetch("http://localhost:11434/api/tags", {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      throw new Error(`Ollama respondió con status ${response.status}`)
+    }
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
 /**
  * POST /api/chat
  * Genera una respuesta usando Ollama (phi-3) basada en archivos relevantes del repositorio
@@ -473,18 +492,20 @@ export async function POST(request: NextRequest) {
     if (!index) {
       return NextResponse.json(
         {
-          error: `El repositorio ${repositoryId} no está indexado. Por favor, indexa el repositorio primero.`,
+          status: "idle",
+          message: `El repositorio ${repositoryId} no está indexado. Por favor, indexa el repositorio primero.`,
         },
         { status: 409 }
       )
     }
 
-    if (index.status !== "completed" && index.status !== "ready") {
+    if (index.status !== "completed") {
       return NextResponse.json(
         {
-          error: `El repositorio ${repositoryId} está siendo indexado (status: ${index.status}). Por favor, espera a que termine la indexación.`,
+          status: "indexing",
+          message: `El repositorio ${repositoryId} está siendo indexado (status: ${index.status}). Por favor, espera a que termine la indexación.`,
         },
-        { status: 409 }
+        { status: 202 }
       )
     }
 
@@ -493,7 +514,8 @@ export async function POST(request: NextRequest) {
     if (!projectBrain) {
       return NextResponse.json(
         {
-          error: `El Project Brain del repositorio ${repositoryId} no existe. Por favor, re-indexa el repositorio para generarlo.`,
+          status: "idle",
+          message: `El Project Brain del repositorio ${repositoryId} no existe. Por favor, re-indexa el repositorio para generarlo.`,
         },
         { status: 409 }
       )
@@ -616,6 +638,17 @@ Main Languages: ${mainLanguages}
     fullContextParts.push(contextText)
     const fullContext = fullContextParts.join("\n")
     const prompt = getSystemPrompt(assistantRole, fullContext, query, conversationMemory || null)
+
+    try {
+      await ensureOllamaAvailable()
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: `Ollama no disponible. Asegúrate de que esté corriendo en http://localhost:11434. (${error instanceof Error ? error.message : "Error desconocido"})`,
+        },
+        { status: 503 }
+      )
+    }
 
     // Llamar a Ollama local
     let ollamaResponse
@@ -789,4 +822,3 @@ Main Languages: ${mainLanguages}
     )
   }
 }
-

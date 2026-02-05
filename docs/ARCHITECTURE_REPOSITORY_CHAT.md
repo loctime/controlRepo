@@ -798,40 +798,16 @@ if (!response.ok) {
 
 **Razón principal:** Separación de responsabilidades.
 
-**Arquitectura actual:**
+**Arquitectura local:**
 ```
-Usuario → Firebase Auth → ControlRepo
-                          ↓
-                    Obtiene GitHub token desde Firestore
-                          ↓
-                    ControlFile usa token para indexar/chat
+Usuario → ControlRepo (local)
+                 ↓
+          GitHub API (acceso público o GITHUB_TOKEN)
 ```
 
-**Por qué funciona así:**
-
-1. **Firebase Auth centralizado**: Un solo sistema de autenticación para toda la aplicación.
-
-2. **GitHub OAuth separado**: El flujo OAuth de GitHub se hace una vez, se guarda en Firestore, luego se reutiliza.
-
-3. **ControlRepo como intermediario**: ControlRepo (Vercel) tiene acceso a Firestore, obtiene el token, lo pasa a ControlFile.
-
-4. **ControlFile no accede a Firestore**: ControlFile (Render) no necesita acceso a Firestore, solo recibe el token cuando lo necesita.
-
-**Alternativa rechazada:**
-```
-Usuario → GitHub OAuth → ControlFile directamente
-```
-
-**Por qué se rechazó:**
-- ControlFile tendría que manejar OAuth directamente
-- No hay unión con sistema de usuarios de la aplicación
-- Más complejo mantener sesiones separadas
-
-**Ventajas de la arquitectura actual:**
-- Un solo sistema de autenticación (Firebase)
-- GitHub token se obtiene una vez, se reutiliza
-- ControlFile no necesita acceso a Firestore
-- Más simple de mantener y debuggear
+**Notas:**
+- No se usa GitHub OAuth.
+- El token opcional se toma desde `GITHUB_TOKEN`.
 
 ## Estructura de Archivos del Sistema
 

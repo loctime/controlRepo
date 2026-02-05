@@ -1,58 +1,20 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
-  Plus,
-  Loader2,
-  AlertCircle,
-  GitBranch,
-  RefreshCw,
-  Github,
-  LogOut,
-} from "lucide-react"
+import { Plus, Loader2, AlertCircle, GitBranch, RefreshCw } from "lucide-react"
 import { useRepository } from "@/lib/repository-context"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { AddRepositoryInline } from "./add-repository-inline"
-import { GitHubRepoSelector } from "./github-repo-selector"
-import { useGitHubConnection } from "@/hooks/use-github-connection"
 
 export function HeaderRepository() {
-  const { repositoryId, status, loading, statusData, indexRepository, refreshStatus, error: repoError } =
+  const { repositoryId, status, loading, indexRepository, error: repoError } =
     useRepository()
 
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [githubSelectorOpen, setGithubSelectorOpen] = useState(false)
   const [reindexing, setReindexing] = useState(false)
-  
-  // Usar el nuevo hook con estados explícitos
-  const { state: githubState, error: githubError, checkStatus, connect, disconnect, isChecking } = useGitHubConnection()
-
-  // Verificar estado de GitHub cuando el componente se monta o cuando cambia la visibilidad
-  // Esto asegura que el estado se actualice después del OAuth
-  useEffect(() => {
-    // Verificar estado al montar
-    checkStatus()
-
-    // También verificar cuando la ventana vuelve a tener foco (útil después de OAuth)
-    const handleFocus = () => {
-      console.log("[HeaderRepository] Ventana recuperó foco, verificando estado GitHub...")
-      checkStatus()
-    }
-
-    window.addEventListener("focus", handleFocus)
-    return () => window.removeEventListener("focus", handleFocus)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // Solo al montar
 
   // Parsear repositoryId para obtener owner/repo
   const parsedRepo = repositoryId
@@ -62,9 +24,6 @@ export function HeaderRepository() {
       })()
     : null
 
-  // Determinar si GitHub está conectado basado en el estado explícito
-  const githubConnected = githubState === "connected"
-  
   /* =======================
      Handlers
   ======================= */
@@ -76,16 +35,6 @@ export function HeaderRepository() {
     } finally {
       setReindexing(false)
     }
-  }
-
-  const handleSelectGitHubRepo = async (repo: {
-    owner: string
-    repo: string
-    branch: string
-  }) => {
-    // Construir repositoryId según contrato: github:owner:repo
-    const repoId = `github:${repo.owner}:${repo.repo}`
-    await indexRepository(repoId)
   }
 
   const repositoryDisplay = parsedRepo
@@ -106,24 +55,12 @@ export function HeaderRepository() {
 
           <Tooltip>
             <TooltipTrigger asChild>
-              {githubConnected ? (
-                <button
-                  onClick={() => setGithubSelectorOpen(true)}
-                  className="font-mono text-xs truncate px-2 py-1 rounded-md border bg-muted/30 hover:bg-muted/50 cursor-pointer transition-colors"
-                >
-                  {repositoryDisplay}
-                </button>
-              ) : (
-                <span className="font-mono text-xs truncate px-2 py-1 rounded-md border bg-muted/30">
-                  {repositoryDisplay}
-                </span>
-              )}
+              <span className="font-mono text-xs truncate px-2 py-1 rounded-md border bg-muted/30">
+                {repositoryDisplay}
+              </span>
             </TooltipTrigger>
             <TooltipContent>
               <p className="font-mono">{repositoryDisplay}</p>
-              {githubConnected && (
-                <p className="text-xs mt-1">Click para seleccionar otro repositorio</p>
-              )}
             </TooltipContent>
           </Tooltip>
 
@@ -198,7 +135,7 @@ export function HeaderRepository() {
                   size="sm"
                   variant="default"
                   onClick={() => indexRepository(repositoryId)}
-                  disabled={loading || githubState !== "connected"}
+                  disabled={loading}
                   className="h-6 text-xs gap-1"
                 >
                   {loading ? (
@@ -209,11 +146,7 @@ export function HeaderRepository() {
                   Indexar
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>
-                {githubState !== "connected" 
-                  ? "Conectá GitHub primero para indexar"
-                  : "Indexar repositorio"}
-              </TooltipContent>
+              <TooltipContent>Indexar repositorio</TooltipContent>
             </Tooltip>
           )}
 
@@ -224,15 +157,9 @@ export function HeaderRepository() {
                   size="sm"
                   variant="outline"
                   onClick={() => {
-                    if (githubState === "connected") {
-                      indexRepository(repositoryId, true)
-                    } else {
-                      // Si GitHub no está conectado, mostrar mensaje pero permitir intentar
-                      // El backend rechazará con un mensaje claro
-                      indexRepository(repositoryId, true)
-                    }
+                    indexRepository(repositoryId, true)
                   }}
-                  disabled={loading || reindexing || githubState === "connecting"}
+                  disabled={loading || reindexing}
                   className="h-6 text-xs gap-1"
                 >
                   {loading || reindexing ? (
@@ -243,100 +170,7 @@ export function HeaderRepository() {
                   Reintentar
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>
-                {githubState === "connecting"
-                  ? "Esperando conexión de GitHub..."
-                  : githubState !== "connected"
-                  ? "Reintentar (conectá GitHub si es necesario)"
-                  : "Reintentar indexación"}
-              </TooltipContent>
-            </Tooltip>
-          )}
-
-          {/* Botón de GitHub con estados explícitos */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="icon-sm"
-                variant={
-                  githubState === "connected" 
-                    ? "secondary" 
-                    : githubState === "error"
-                    ? "destructive"
-                    : "ghost"
-                }
-                onClick={async () => {
-                  // Cuando connected === false, iniciar OAuth limpio
-                  if (githubState === "not_connected") {
-                    await connect()
-                  } else if (githubState === "connected") {
-                    // Si está conectado, permitir reconectar manualmente (fallback)
-                    await checkStatus()
-                  } else if (githubState === "error") {
-                    // Si hay error, reintentar verificación
-                    await checkStatus()
-                  }
-                }}
-                className="h-6 w-6"
-                disabled={isChecking || githubState === "connecting"}
-              >
-                {isChecking || githubState === "connecting" ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : githubState === "error" ? (
-                  <AlertCircle className="h-4 w-4" />
-                ) : (
-                  <Github className="h-4 w-4" />
-                )}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {githubState === "connected" && (
-                <div>
-                  <p>GitHub conectado</p>
-                  <p className="text-xs mt-1 text-muted-foreground">Click para verificar estado</p>
-                </div>
-              )}
-              {githubState === "connecting" && (
-                <p>Verificando conexión...</p>
-              )}
-              {githubState === "not_connected" && (
-                <p>Conectar GitHub</p>
-              )}
-              {githubState === "error" && (
-                <div>
-                  <p>Error de conexión</p>
-                  {githubError && (
-                    <p className="text-xs mt-1 text-destructive max-w-xs">{githubError}</p>
-                  )}
-                  <p className="text-xs mt-1 text-muted-foreground">Click para reintentar</p>
-                </div>
-              )}
-            </TooltipContent>
-          </Tooltip>
-
-          {/* Botón de Desconectar GitHub - solo cuando está conectado */}
-          {githubState === "connected" && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  onClick={async () => {
-                    await disconnect()
-                  }}
-                  className="h-6 w-6"
-                  disabled={isChecking || githubState === "connecting"}
-                >
-                  {isChecking ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <LogOut className="h-4 w-4" />
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Desconectar GitHub</p>
-              </TooltipContent>
+              <TooltipContent>Reintentar indexación</TooltipContent>
             </Tooltip>
           )}
 
@@ -361,11 +195,6 @@ export function HeaderRepository() {
         onClose={() => setDialogOpen(false)}
       />
 
-      <GitHubRepoSelector
-        isOpen={githubSelectorOpen}
-        onClose={() => setGithubSelectorOpen(false)}
-        onSelect={handleSelectGitHubRepo}
-      />
     </div>
   )
 }

@@ -71,8 +71,8 @@ export function ChatInterface() {
   const { repositoryId, preferencesLoaded, status, error } = useRepository()
   const { setContextFiles } = useContextFiles()
 
-  // Solo status === "completed" o "ready" (legacy) habilita el chat
-  const canChat = status === "completed" || status === "ready"
+  // Solo status === "completed" habilita el chat
+  const canChat = status === "completed"
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -225,9 +225,9 @@ export function ChatInterface() {
   }
 
   /* -------------------------------------------
-   * Polling al endpoint /api/chat/status
+   * Polling al endpoint /api/repository/status
    * ------------------------------------------- */
-  const startStatusPolling = () => {
+  const startRepositoryPolling = (repoId: string) => {
     if (isPollingRef.current) {
       return // Evitar múltiples polls simultáneos
     }
@@ -236,7 +236,9 @@ export function ChatInterface() {
     
     const pollStatus = async () => {
       try {
-        const res = await fetch("/api/chat/status")
+        const res = await fetch(
+          `/api/repository/status?repositoryId=${encodeURIComponent(repoId)}`
+        )
         
         if (!res.ok) {
           console.warn("Error consultando status:", res.status)
@@ -245,26 +247,35 @@ export function ChatInterface() {
         
         const data = await res.json()
         
-        // El endpoint devuelve { ok: boolean, status?: string, error?: string }
-        // Si ok es true o hay status, consideramos que no hay procesamiento
-        if (data.ok || (data.status && data.status !== "processing")) {
+        if (data.status === "completed") {
           stopStatusPolling()
-          
-          // Rehabilitar el chat
+
           setWaitingForPrevious(false)
           setIsQueryRunning(false)
           isQueryRunningRef.current = false
-          
-          // Actualizar mensaje para indicar que se puede continuar
           setMessages((prev) => {
             const updated = [...prev]
             const last = updated[updated.length - 1]
             if (last?.role === "assistant" && last.content === "Consulta en curso…") {
               updated[updated.length - 1] = {
                 role: "assistant",
-                content: data.error 
-                  ? "Hubo un error en la consulta anterior. Podés intentar nuevamente."
-                  : "Consulta anterior finalizada. Podés enviar una nueva pregunta."
+                content: "Repositorio listo. Podés enviar una nueva pregunta.",
+              }
+            }
+            return updated
+          })
+        } else if (data.status === "error" || data.status === "idle") {
+          stopStatusPolling()
+          setWaitingForPrevious(false)
+          setIsQueryRunning(false)
+          isQueryRunningRef.current = false
+          setMessages((prev) => {
+            const updated = [...prev]
+            const last = updated[updated.length - 1]
+            if (last?.role === "assistant" && last.content === "Consulta en curso…") {
+              updated[updated.length - 1] = {
+                role: "assistant",
+                content: data.error || "No hay un índice listo para consultar.",
               }
             }
             return updated
@@ -358,21 +369,27 @@ export function ChatInterface() {
 
       const data = (await res.json()) as ChatQueryResponse
 
-      // Manejar 409: lock activo - iniciar polling para esperar desbloqueo
+      // Manejar 409: repositorio no listo - iniciar polling local
       if (res.status === 409) {
+        const statusData = data as { status?: string; message?: string }
         setWaitingForPrevious(true)
         setMessages((prev) => {
           const updated = [...prev]
           updated[updated.length - 1] = {
             role: "assistant",
-            content: "Consulta en curso…",
+            content: statusData.message || "Repositorio no listo. Esperando indexación…",
           }
           return updated
         })
         setContextFiles([])
         
-        // Iniciar polling para monitorear cuándo se desbloquea
-        startStatusPolling()
+        if (statusData.status === "indexing") {
+          startRepositoryPolling(repositoryId)
+        } else {
+          setWaitingForPrevious(false)
+          setIsQueryRunning(false)
+          isQueryRunningRef.current = false
+        }
         return
       }
 
@@ -415,7 +432,7 @@ export function ChatInterface() {
     res: Response,
     data: ChatQueryResponse
   ) => {
-    // Según contrato: 200 = success, 202 = indexing, 400 = not ready
+    // Según contrato local: 200 = success, 202 = indexing, 409 = no listo
     if (res.status === 202) {
       // Repositorio indexando
       const indexingData = data as Extract<ChatQueryResponse, { status: "indexing" }>

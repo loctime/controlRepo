@@ -4,7 +4,6 @@ import React, { createContext, useContext, useEffect, useState, useRef } from "r
 import { User, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth"
 import { auth } from "./firebase"
 import { initializeUserDocument } from "./bootstrap"
-import { ensureAccount } from "./auth/ensure-account"
 
 interface AuthContextType {
   user: User | null
@@ -19,8 +18,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
-  // Ref para trackear el UID del usuario para el cual ya se ejecutó ensureAccount
-  const ensuredAccountRef = useRef<string | null>(null)
+  const initializedUserRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!auth) {
@@ -32,21 +30,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (firebaseUser) {
         setUser(firebaseUser)
         
-        // Asegurar cuenta global en ControlFile (idempotente, una vez por usuario)
-        if (ensuredAccountRef.current !== firebaseUser.uid) {
-          ensuredAccountRef.current = firebaseUser.uid
-          // Ejecutar en background, no bloquear renderizado
-          firebaseUser.getIdToken()
-            .then((idToken) => ensureAccount(idToken, firebaseUser.uid))
-            .catch((error) => {
-              // Error al obtener token - no bloquear, solo loguear
-              console.warn(`[AuthProvider] ⚠️ Error al obtener token para ensureAccount (UID: ${firebaseUser.uid}):`, error)
-            })
+        if (initializedUserRef.current !== firebaseUser.uid) {
+          initializedUserRef.current = firebaseUser.uid
         }
       } else {
         setUser(null)
-        // Resetear ref cuando el usuario cierra sesión
-        ensuredAccountRef.current = null
+        initializedUserRef.current = null
       }
       setLoading(false)
     })
@@ -58,19 +47,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!auth) throw new Error("Firebase Auth no está inicializado")
     const userCredential = await signInWithEmailAndPassword(auth, email, password)
     
-    // Asegurar cuenta global en ControlFile después de login exitoso
-    // Ejecutar en background, no bloquear el flujo de login
     const firebaseUser = userCredential.user
-    if (ensuredAccountRef.current !== firebaseUser.uid) {
-      ensuredAccountRef.current = firebaseUser.uid
-      console.log(`[AuthProvider] 🔐 Login exitoso, asegurando cuenta global (UID: ${firebaseUser.uid})`)
-      firebaseUser.getIdToken()
-        .then((idToken) => ensureAccount(idToken, firebaseUser.uid))
-        .catch((error) => {
-          // Error al obtener token - no bloquear, solo loguear
-          console.warn(`[AuthProvider] ⚠️ Error al obtener token para ensureAccount después de login (UID: ${firebaseUser.uid}):`, error)
-        })
-    }
+    initializedUserRef.current = firebaseUser.uid
   }
 
   const register = async (email: string, password: string) => {
@@ -80,26 +58,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // La inicialización de carpetas es responsabilidad exclusiva de ControlFile API
     await initializeUserDocument(userCredential.user.uid, email)
     
-    // Asegurar cuenta global en ControlFile después de registro exitoso
-    // Ejecutar en background, no bloquear el flujo de registro
     const firebaseUser = userCredential.user
-    if (ensuredAccountRef.current !== firebaseUser.uid) {
-      ensuredAccountRef.current = firebaseUser.uid
-      console.log(`[AuthProvider] 📝 Registro exitoso, asegurando cuenta global (UID: ${firebaseUser.uid})`)
-      firebaseUser.getIdToken()
-        .then((idToken) => ensureAccount(idToken, firebaseUser.uid))
-        .catch((error) => {
-          // Error al obtener token - no bloquear, solo loguear
-          console.warn(`[AuthProvider] ⚠️ Error al obtener token para ensureAccount después de registro (UID: ${firebaseUser.uid}):`, error)
-        })
-    }
+    initializedUserRef.current = firebaseUser.uid
   }
 
   const logout = async () => {
     if (!auth) throw new Error("Firebase Auth no está inicializado")
     await signOut(auth)
-    // Resetear ref cuando el usuario cierra sesión
-    ensuredAccountRef.current = null
+    initializedUserRef.current = null
   }
 
   return <AuthContext.Provider value={{ user, loading, login, register, logout }}>{children}</AuthContext.Provider>
@@ -112,4 +78,3 @@ export function useAuth() {
   }
   return context
 }
-

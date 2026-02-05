@@ -145,7 +145,7 @@ export function AddRepositoryInline({ isOpen, onClose }: AddRepositoryInlineProp
             <p className="text-xs text-destructive">{displayError}</p>
             {url.trim() && (
               <p className="text-xs text-muted-foreground">
-                Verificá que la URL sea correcta y que GitHub esté conectado
+                Verificá que la URL sea correcta y que el repositorio exista
               </p>
             )}
           </div>
@@ -184,4 +184,3 @@ export function AddRepositoryInline({ isOpen, onClose }: AddRepositoryInlineProp
     </div>
   )
 }
-

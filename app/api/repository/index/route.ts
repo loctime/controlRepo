@@ -1,53 +1,22 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getAuthenticatedUserId } from "@/lib/auth/server-auth"
+import { indexRepository } from "@/lib/repository/indexer"
+import { saveRepositoryIndex, acquireIndexLock, releaseIndexLock, getRepositoryIndex } from "@/lib/repository/storage"
+import { createRepositoryId } from "@/lib/repository/utils"
+import { resolveRepositoryBranch } from "@/lib/github/client"
+import { generateMinimalProjectBrain } from "@/lib/project-brain/generator"
+import { saveProjectBrain } from "@/lib/project-brain/storage-filesystem"
+import { generateMetrics } from "@/lib/repository/metrics/generator"
+import { saveMetrics } from "@/lib/repository/metrics/storage-filesystem"
+import type { IndexResponse, RepositoryIndex } from "@/lib/types/repository"
 
 /**
  * POST /api/repository/index
- * Proxy/Gateway que delega la indexación a ControlFile (Render)
- * 
- * Responsabilidades:
- * 1. Autenticar usuario (Firebase)
- * 2. Validar parámetros básicos
- * 3. Hacer POST HTTP a ControlFile (Render)
- * 4. Retornar respuesta del backend
- * 
- * NO hace:
- * - Escritura en filesystem
- * - Adquisición de locks
- * - Indexación de repositorios
- * - Generación de métricas o project brain
+ * Indexa un repositorio localmente (sin dependencias cloud).
  */
 export async function POST(request: NextRequest) {
-  console.log("[INDEX] POST /api/repository/index - Iniciando proxy a ControlFile")
-  console.log(JSON.stringify({
-    level: "info",
-    service: "controlfile-backend",
-    environment: process.env.NODE_ENV || "production",
-    timestamp: new Date().toISOString(),
-    path: "/api/repository/index",
-    method: "POST",
-    message: "Proxy iniciado",
-  }))
-
   try {
-    // 1) Autenticación: Verificar token Firebase y obtener UID
-    let uid: string
-    try {
-      console.log("[INDEX] Verificando autenticación...")
-      uid = await getAuthenticatedUserId(request)
-      console.log(`[INDEX] Usuario autenticado: ${uid}`)
-    } catch (error) {
-      console.error("[INDEX] Error de autenticación:", error)
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : "No autorizado" },
-        { status: 401 }
-      )
-    }
-
-    // 2) Validar parámetros según contrato API v1
     const body = await request.json()
     const { repositoryId, force } = body
-    console.log(`[INDEX] Parámetros recibidos: repositoryId=${repositoryId}, force=${force || false}`)
 
     if (!repositoryId || typeof repositoryId !== "string") {
       return NextResponse.json(
@@ -56,7 +25,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validar formato: github:owner:repo
     if (!repositoryId.startsWith("github:")) {
       return NextResponse.json(
         { error: "repositoryId debe tener formato: github:owner:repo" },
@@ -64,7 +32,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Parsear repositoryId
     const parts = repositoryId.replace("github:", "").split(":")
     if (parts.length !== 2) {
       return NextResponse.json(
@@ -75,7 +42,6 @@ export async function POST(request: NextRequest) {
 
     const owner = parts[0].trim()
     const repo = parts[1].trim()
-    const branch = "main" // Por defecto, el backend puede usar main
 
     if (!owner || !repo) {
       return NextResponse.json(
@@ -84,86 +50,122 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log(`[INDEX] Parseado: owner=${owner}, repo=${repo}, branch=${branch}`)
-
-    // 3) Hacer POST HTTP a ControlFile (Render)
-    const controlFileUrl = process.env.CONTROLFILE_URL || process.env.NEXT_PUBLIC_CONTROLFILE_URL
-    if (!controlFileUrl) {
-      console.error("[INDEX] CONTROLFILE_URL no configurada")
-      return NextResponse.json(
-        { error: "Configuración del backend no disponible" },
-        { status: 500 }
-      )
-    }
-
-    const backendUrl = `${controlFileUrl}/api/repository/index`
-    console.log(`[INDEX] Enviando request a ControlFile: ${backendUrl}`)
-
+    let resolvedBranch: { branch: string; lastCommit: string }
     try {
-      const backendResponse = await fetch(backendUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          owner,
-          repo,
-          branch: branch || "main",
-          uid,
-        }),
-      })
-
-      const responseData = await backendResponse.json()
-      console.log(`[INDEX] Respuesta de ControlFile: ${backendResponse.status}`)
-
-      // 5) Retornar respuesta del backend
-      return NextResponse.json(responseData, {
-        status: backendResponse.status,
-      })
-    } catch (fetchError) {
-      console.error("[INDEX] Error al comunicarse con ControlFile:", fetchError)
+      resolvedBranch = await resolveRepositoryBranch(owner, repo)
+    } catch (error) {
       return NextResponse.json(
-        {
-          error: "Error al comunicarse con el backend de indexación",
-          details: fetchError instanceof Error ? fetchError.message : "Error desconocido",
-        },
-        { status: 502 }
+        { error: `Error al resolver rama: ${error instanceof Error ? error.message : "Error desconocido"}` },
+        { status: 400 }
       )
     }
-  } catch (error) {
-    console.error("[INDEX] ===== Error en POST /api/repository/index =====")
-    console.error("[INDEX] Error:", error)
-    console.error("[INDEX] Stack:", error instanceof Error ? error.stack : "No stack disponible")
 
-    // Determinar el tipo de error para ayudar con el debugging
-    let errorType = "UNKNOWN_ERROR"
-    let errorMessage = error instanceof Error ? error.message : "Error desconocido"
+    const actualBranch = resolvedBranch.branch
+    const repoIdWithBranch = createRepositoryId(owner, repo, actualBranch)
 
-    if (errorMessage.includes("FIREBASE_SERVICE_ACCOUNT_KEY") || errorMessage.includes("Firebase Admin")) {
-      errorType = "FIREBASE_INIT_ERROR"
-    } else if (errorMessage.includes("Token inválido") || errorMessage.includes("Authorization")) {
-      errorType = "AUTH_ERROR"
-    } else if (errorMessage.includes("GitHub")) {
-      errorType = "GITHUB_ERROR"
+    const existingIndex = await getRepositoryIndex(repoIdWithBranch)
+    if (existingIndex && !force) {
+      return NextResponse.json<IndexResponse>(
+        {
+          status: existingIndex.status === "error" ? "error" : existingIndex.status,
+          repositoryId: existingIndex.id,
+          message: existingIndex.status === "completed"
+            ? "Repositorio ya indexado"
+            : "Indexación en progreso",
+        },
+        { status: existingIndex.status === "completed" ? 200 : 202 }
+      )
     }
 
-    // Log estructurado para producción
-    console.error(JSON.stringify({
-      level: "error",
-      service: "controlfile-backend",
-      environment: process.env.NODE_ENV || "production",
-      timestamp: new Date().toISOString(),
-      path: "/api/repository/index",
-      method: "POST",
-      errorType,
-      errorMessage: errorMessage.substring(0, 200),
-      hasStack: error instanceof Error && !!error.stack,
-    }))
+    const lockAcquired = await acquireIndexLock(repoIdWithBranch, "system")
+    if (!lockAcquired) {
+      return NextResponse.json<IndexResponse>(
+        {
+          status: "error",
+          repositoryId: repoIdWithBranch,
+          error: "El repositorio ya está siendo indexado",
+        },
+        { status: 409 }
+      )
+    }
 
+    const now = new Date().toISOString()
+    const baseIndex: RepositoryIndex = {
+      id: repoIdWithBranch,
+      owner,
+      repo,
+      branch: actualBranch,
+      defaultBranch: actualBranch,
+      status: "indexing",
+      indexedAt: now,
+      lastCommit: resolvedBranch.lastCommit,
+      metadata: {},
+      files: [],
+      keyFiles: {},
+      summary: {
+        totalFiles: 0,
+        totalLines: 0,
+        languages: {},
+        categories: {
+          component: 0,
+          hook: 0,
+          service: 0,
+          config: 0,
+          docs: 0,
+          test: 0,
+          utility: 0,
+          style: 0,
+          other: 0,
+        },
+        structure: {
+          components: 0,
+          hooks: 0,
+          services: 0,
+          configs: 0,
+          docs: 0,
+          tests: 0,
+        },
+      },
+    }
+
+    await saveRepositoryIndex(baseIndex)
+
+    indexRepository(owner, repo, actualBranch)
+      .then(async (updatedIndex) => {
+        updatedIndex.status = "completed"
+        await saveRepositoryIndex(updatedIndex)
+
+        const projectBrain = generateMinimalProjectBrain(updatedIndex)
+        await saveProjectBrain(projectBrain)
+
+        const metrics = generateMetrics(updatedIndex, projectBrain)
+        await saveMetrics(repoIdWithBranch, metrics)
+
+        await releaseIndexLock(repoIdWithBranch)
+      })
+      .catch(async (error) => {
+        console.error(`[INDEX] Error al indexar ${repoIdWithBranch}:`, error)
+        const errorIndex = await getRepositoryIndex(repoIdWithBranch)
+        if (errorIndex) {
+          errorIndex.status = "error"
+          await saveRepositoryIndex(errorIndex)
+        }
+        await releaseIndexLock(repoIdWithBranch)
+      })
+
+    return NextResponse.json<IndexResponse>(
+      {
+        status: "indexing",
+        repositoryId: repoIdWithBranch,
+        message: "Indexación iniciada",
+      },
+      { status: 202 }
+    )
+  } catch (error) {
+    console.error("Error en POST /api/repository/index:", error)
     return NextResponse.json(
       {
-        error: errorMessage,
-        errorType,
+        error: error instanceof Error ? error.message : "Error desconocido",
       },
       { status: 500 }
     )

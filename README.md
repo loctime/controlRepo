@@ -55,7 +55,37 @@ Toda la documentación técnica se encuentra en la carpeta `/docs`:
 - ✅ Búsqueda de archivos relevantes basada en metadata
 - ✅ Integración con GitHub API para indexación
 
-## 🔧 Requisitos
+## 🔧 Requisitos (modo local)
+- Node.js + pnpm
 - Ollama ejecutándose en http://localhost:11434
 - Modelo `phi3:mini` instalado en Ollama
-- Token de GitHub configurado en variables de entorno (`GITHUB_TOKEN`)
+- (Opcional) `GITHUB_TOKEN` para repos privados o límites de rate de GitHub
+
+## ▶️ Cómo correr ControlRepo en local
+1. Iniciar Ollama:
+   ```bash
+   ollama serve
+   ```
+2. Instalar dependencias:
+   ```bash
+   pnpm install
+   ```
+3. (Opcional) Exportar token de GitHub:
+   ```bash
+   export GITHUB_TOKEN="tu_token"
+   ```
+4. Levantar la app:
+   ```bash
+   pnpm dev
+   ```
+
+## 🔁 Flujo local completo
+1. Abrir la app en `http://localhost:3000`.
+2. Pegar la URL del repo de GitHub y indexar.
+3. Esperar a que el status sea **completed**.
+4. Chatear con el repositorio usando Ollama local.
+
+## ✅ Modo local sin cloud
+- No usa Render, Vercel, Cloudflare ni túneles.
+- No usa GitHub OAuth: la indexación usa acceso público y, si hace falta, `GITHUB_TOKEN`.
+- Todos los índices, métricas y project brain se guardan en `.repository-indexes/`.
