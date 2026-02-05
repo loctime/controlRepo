@@ -12,7 +12,7 @@ import { generateFlows } from "@/lib/repository/flows/generator"
 import { saveFlows, getFlows } from "@/lib/repository/flows/storage-filesystem"
 import { createRepositoryId } from "@/lib/repository/utils"
 import { resolveRepositoryBranch } from "@/lib/github/client"
-import { getAuthenticatedUserId, getGitHubAccessToken } from "@/lib/auth/server-auth"
+import { getAuthenticatedUserId } from "@/lib/auth/server-auth"
 
 /**
  * POST /api/repository/flows/generate
@@ -32,15 +32,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Obtener access_token de GitHub del usuario desde Firestore
-    const accessToken = await getGitHubAccessToken(uid)
-    if (!accessToken) {
-      return NextResponse.json(
-        { error: "GitHub no conectado. Por favor, conecta tu cuenta de GitHub primero." },
-        { status: 400 }
-      )
-    }
-
     const body = await request.json()
     const { owner, repo, branch } = body
 
@@ -55,7 +46,7 @@ export async function POST(request: NextRequest) {
     // Resolver rama
     let resolvedBranch: { branch: string; lastCommit: string }
     try {
-      resolvedBranch = await resolveRepositoryBranch(owner, repo, accessToken, branch)
+      resolvedBranch = await resolveRepositoryBranch(owner, repo, branch)
     } catch (error) {
       return NextResponse.json(
         { error: `Error al resolver rama: ${error instanceof Error ? error.message : "Error desconocido"}` },
@@ -140,15 +131,6 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Obtener access_token de GitHub del usuario desde Firestore
-    const accessToken = await getGitHubAccessToken(uid)
-    if (!accessToken) {
-      return NextResponse.json(
-        { error: "GitHub no conectado. Por favor, conecta tu cuenta de GitHub primero." },
-        { status: 400 }
-      )
-    }
-
     const { searchParams } = new URL(request.url)
     const owner = searchParams.get("owner")
     const repo = searchParams.get("repo")
@@ -165,7 +147,7 @@ export async function GET(request: NextRequest) {
     // Resolver rama
     let resolvedBranch: { branch: string; lastCommit: string }
     try {
-      resolvedBranch = await resolveRepositoryBranch(owner, repo, accessToken, branch || undefined)
+      resolvedBranch = await resolveRepositoryBranch(owner, repo, branch || undefined)
     } catch (error) {
       return NextResponse.json(
         { error: `Error al resolver rama: ${error instanceof Error ? error.message : "Error desconocido"}` },
@@ -197,4 +179,3 @@ export async function GET(request: NextRequest) {
     )
   }
 }
-

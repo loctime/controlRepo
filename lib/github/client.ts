@@ -1,10 +1,51 @@
 /**
  * Cliente para GitHub API
  * Solo se usa en el servidor (API routes)
- * Todas las funciones requieren un accessToken de GitHub del usuario
+ * Todas las funciones intentan primero acceso público y reintentan con token env si es necesario
  */
 
 const GITHUB_API_BASE = "https://api.github.com"
+const GITHUB_FALLBACK_STATUSES = new Set([401, 403])
+
+function getFallbackToken(): string | null {
+  const token = process.env.GITHUB_TOKEN
+  return token && token.trim().length > 0 ? token.trim() : null
+}
+
+function buildHeaders(token?: string): HeadersInit {
+  const headers: HeadersInit = {
+    Accept: "application/vnd.github.v3+json",
+  }
+
+  if (token) {
+    return {
+      ...headers,
+      Authorization: `token ${token}`,
+    }
+  }
+
+  return headers
+}
+
+async function fetchWithFallback(url: string): Promise<Response> {
+  const initialResponse = await fetch(url, {
+    headers: buildHeaders(),
+  })
+
+  if (!GITHUB_FALLBACK_STATUSES.has(initialResponse.status)) {
+    return initialResponse
+  }
+
+  const fallbackToken = getFallbackToken()
+  if (!fallbackToken) {
+    return initialResponse
+  }
+
+  console.warn(`[GitHub] Reintentando con token por error ${initialResponse.status} en ${url}`)
+  return fetch(url, {
+    headers: buildHeaders(fallbackToken),
+  })
+}
 
 interface GitHubTreeItem {
   path: string
@@ -73,20 +114,12 @@ interface GitHubBranchResponse {
 export async function getRepositoryTree(
   owner: string,
   repo: string,
-  branch: string,
-  accessToken: string
+  branch: string
 ): Promise<GitHubTreeResponse> {
-  if (!accessToken) {
-    throw new Error("accessToken es requerido")
-  }
-
   // Primero obtener el SHA del commit de la rama
-  const branchResponse = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}/branches/${branch}`, {
-    headers: {
-      Authorization: `token ${accessToken}`,
-      Accept: "application/vnd.github.v3+json",
-    },
-  })
+  const branchResponse = await fetchWithFallback(
+    `${GITHUB_API_BASE}/repos/${owner}/${repo}/branches/${branch}`
+  )
 
   if (!branchResponse.ok) {
     if (branchResponse.status === 404) {
@@ -99,14 +132,8 @@ export async function getRepositoryTree(
   const commitSha = branchData.commit.sha
 
   // Obtener el árbol recursivo
-  const treeResponse = await fetch(
-    `${GITHUB_API_BASE}/repos/${owner}/${repo}/git/trees/${commitSha}?recursive=1`,
-    {
-      headers: {
-        Authorization: `token ${accessToken}`,
-        Accept: "application/vnd.github.v3+json",
-      },
-    }
+  const treeResponse = await fetchWithFallback(
+    `${GITHUB_API_BASE}/repos/${owner}/${repo}/git/trees/${commitSha}?recursive=1`
   )
 
   if (!treeResponse.ok) {
@@ -123,21 +150,10 @@ export async function getFileContent(
   owner: string,
   repo: string,
   path: string,
-  branch: string,
-  accessToken: string
+  branch: string
 ): Promise<GitHubBlobResponse> {
-  if (!accessToken) {
-    throw new Error("accessToken es requerido")
-  }
-
-  const response = await fetch(
-    `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${path}?ref=${branch}`,
-    {
-      headers: {
-        Authorization: `token ${accessToken}`,
-        Accept: "application/vnd.github.v3+json",
-      },
-    }
+  const response = await fetchWithFallback(
+    `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${path}?ref=${branch}`
   )
 
   if (!response.ok) {
@@ -155,19 +171,9 @@ export async function getFileContent(
  */
 export async function getRepositoryMetadata(
   owner: string,
-  repo: string,
-  accessToken: string
+  repo: string
 ): Promise<GitHubRepositoryResponse> {
-  if (!accessToken) {
-    throw new Error("accessToken es requerido")
-  }
-
-  const response = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}`, {
-    headers: {
-      Authorization: `token ${accessToken}`,
-      Accept: "application/vnd.github.v3+json",
-    },
-  })
+  const response = await fetchWithFallback(`${GITHUB_API_BASE}/repos/${owner}/${repo}`)
 
   if (!response.ok) {
     if (response.status === 404) {
@@ -185,22 +191,11 @@ export async function getRepositoryMetadata(
 export async function getLastCommit(
   owner: string,
   repo: string,
-  branch: string,
-  accessToken: string
+  branch: string
 ): Promise<string> {
-  if (!accessToken) {
-    throw new Error("accessToken es requerido")
-  }
-
   // Usar el endpoint correcto para obtener commits de una rama
-  const response = await fetch(
-    `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits?sha=${branch}&per_page=1`,
-    {
-      headers: {
-        Authorization: `token ${accessToken}`,
-        Accept: "application/vnd.github.v3+json",
-      },
-    }
+  const response = await fetchWithFallback(
+    `${GITHUB_API_BASE}/repos/${owner}/${repo}/commits?sha=${branch}&per_page=1`
   )
 
   if (!response.ok) {
@@ -222,19 +217,9 @@ export async function getLastCommit(
  */
 export async function getAllBranches(
   owner: string,
-  repo: string,
-  accessToken: string
+  repo: string
 ): Promise<GitHubBranchResponse[]> {
-  if (!accessToken) {
-    throw new Error("accessToken es requerido")
-  }
-
-  const response = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}/branches`, {
-    headers: {
-      Authorization: `token ${accessToken}`,
-      Accept: "application/vnd.github.v3+json",
-    },
-  })
+  const response = await fetchWithFallback(`${GITHUB_API_BASE}/repos/${owner}/${repo}/branches`)
 
   if (!response.ok) {
     throw new Error(`Error al obtener ramas: ${response.statusText}`)
@@ -249,19 +234,11 @@ export async function getAllBranches(
 export async function branchExists(
   owner: string,
   repo: string,
-  branch: string,
-  accessToken: string
+  branch: string
 ): Promise<boolean> {
-  if (!accessToken) {
-    throw new Error("accessToken es requerido")
-  }
-
-  const response = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}/branches/${branch}`, {
-    headers: {
-      Authorization: `token ${accessToken}`,
-      Accept: "application/vnd.github.v3+json",
-    },
-  })
+  const response = await fetchWithFallback(
+    `${GITHUB_API_BASE}/repos/${owner}/${repo}/branches/${branch}`
+  )
 
   return response.ok
 }
@@ -278,11 +255,10 @@ export async function branchExists(
 export async function resolveRepositoryBranch(
   owner: string,
   repo: string,
-  accessToken: string,
   requestedBranch?: string
 ): Promise<{ branch: string; lastCommit: string }> {
   // Obtener metadatos del repositorio para obtener defaultBranch
-  const repoMetadata = await getRepositoryMetadata(owner, repo, accessToken)
+  const repoMetadata = await getRepositoryMetadata(owner, repo)
   const defaultBranch = repoMetadata.default_branch
 
   let resolvedBranch: string | null = null
@@ -290,7 +266,7 @@ export async function resolveRepositoryBranch(
 
   // 1. Si se proporciona requestedBranch, validar que existe
   if (requestedBranch) {
-    const exists = await branchExists(owner, repo, requestedBranch, accessToken)
+    const exists = await branchExists(owner, repo, requestedBranch)
     if (exists) {
       resolvedBranch = requestedBranch
     } else {
@@ -300,7 +276,7 @@ export async function resolveRepositoryBranch(
 
   // 2. Si no se resolvió, usar defaultBranch si existe
   if (!resolvedBranch && defaultBranch) {
-    const exists = await branchExists(owner, repo, defaultBranch, accessToken)
+    const exists = await branchExists(owner, repo, defaultBranch)
     if (exists) {
       resolvedBranch = defaultBranch
       console.log(`[BRANCH] Using default branch "${defaultBranch}" for ${owner}/${repo}`)
@@ -310,7 +286,7 @@ export async function resolveRepositoryBranch(
   // 3. Si tampoco existe, obtener todas las ramas y elegir la más reciente
   if (!resolvedBranch) {
     console.log(`[BRANCH] No valid branch found, fetching all branches for ${owner}/${repo}`)
-    const branches = await getAllBranches(owner, repo, accessToken)
+    const branches = await getAllBranches(owner, repo)
 
     if (branches.length === 0) {
       throw new Error(`No se encontraron ramas en el repositorio ${owner}/${repo}`)
@@ -330,7 +306,7 @@ export async function resolveRepositoryBranch(
 
   // Obtener el último commit de la rama resuelta si no lo tenemos
   if (!lastCommit && resolvedBranch) {
-    lastCommit = await getLastCommit(owner, repo, resolvedBranch, accessToken)
+    lastCommit = await getLastCommit(owner, repo, resolvedBranch)
   }
 
   if (!resolvedBranch) {
@@ -342,4 +318,3 @@ export async function resolveRepositoryBranch(
     lastCommit,
   }
 }
-
