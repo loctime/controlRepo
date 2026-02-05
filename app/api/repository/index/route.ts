@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getAuthenticatedUserId, getGitHubAccessToken } from "@/lib/auth/server-auth"
+import { getAuthenticatedUserId } from "@/lib/auth/server-auth"
 
 /**
  * POST /api/repository/index
@@ -7,10 +7,9 @@ import { getAuthenticatedUserId, getGitHubAccessToken } from "@/lib/auth/server-
  * 
  * Responsabilidades:
  * 1. Autenticar usuario (Firebase)
- * 2. Obtener accessToken de GitHub desde Firestore
- * 3. Validar parámetros básicos
- * 4. Hacer POST HTTP a ControlFile (Render)
- * 5. Retornar respuesta del backend
+ * 2. Validar parámetros básicos
+ * 3. Hacer POST HTTP a ControlFile (Render)
+ * 4. Retornar respuesta del backend
  * 
  * NO hace:
  * - Escritura en filesystem
@@ -45,19 +44,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 2) Obtener access_token de GitHub del usuario desde Firestore
-    console.log(`[INDEX] Obteniendo access_token de GitHub para usuario ${uid}...`)
-    const accessToken = await getGitHubAccessToken(uid)
-    if (!accessToken) {
-      console.error(`[INDEX] GitHub no conectado para usuario ${uid}`)
-      return NextResponse.json(
-        { error: "GitHub no conectado. Por favor, conecta tu cuenta de GitHub primero." },
-        { status: 400 }
-      )
-    }
-    console.log(`[INDEX] Access_token de GitHub obtenido para usuario ${uid}`)
-
-    // 3) Validar parámetros según contrato API v1
+    // 2) Validar parámetros según contrato API v1
     const body = await request.json()
     const { repositoryId, force } = body
     console.log(`[INDEX] Parámetros recibidos: repositoryId=${repositoryId}, force=${force || false}`)
@@ -99,7 +86,7 @@ export async function POST(request: NextRequest) {
 
     console.log(`[INDEX] Parseado: owner=${owner}, repo=${repo}, branch=${branch}`)
 
-    // 4) Hacer POST HTTP a ControlFile (Render)
+    // 3) Hacer POST HTTP a ControlFile (Render)
     const controlFileUrl = process.env.CONTROLFILE_URL || process.env.NEXT_PUBLIC_CONTROLFILE_URL
     if (!controlFileUrl) {
       console.error("[INDEX] CONTROLFILE_URL no configurada")
@@ -122,7 +109,6 @@ export async function POST(request: NextRequest) {
           owner,
           repo,
           branch: branch || "main",
-          accessToken,
           uid,
         }),
       })
@@ -183,4 +169,3 @@ export async function POST(request: NextRequest) {
     )
   }
 }
-

@@ -21,13 +21,11 @@ const KEY_FILES_CONCURRENCY = 4 // Máximo 4 archivos clave procesados simultán
 
 /**
  * Indexa un repositorio completo
- * @param accessToken Token de acceso de GitHub del usuario
  * @throws Error si el repositorio excede el límite de archivos
  */
 export async function indexRepository(
   owner: string,
   repo: string,
-  accessToken: string,
   branch?: string
 ): Promise<RepositoryIndex> {
   // Resolver rama primero para crear repositoryId con branch
@@ -39,10 +37,10 @@ export async function indexRepository(
     const repositoryId = createRepositoryId(owner, repo, branch)
     existingIndex = await getRepositoryIndex(repositoryId)
     if (existingIndex) {
-      resolvedBranch = await resolveRepositoryBranch(owner, repo, accessToken, branch)
+      resolvedBranch = await resolveRepositoryBranch(owner, repo, branch)
     } else {
       // Si no existe, usar el branch proporcionado
-      resolvedBranch = await resolveRepositoryBranch(owner, repo, accessToken, branch)
+      resolvedBranch = await resolveRepositoryBranch(owner, repo, branch)
     }
   } else {
     // Si no se proporciona branch, buscar cualquier índice existente del repo
@@ -53,13 +51,13 @@ export async function indexRepository(
       const repositoryId = createRepositoryId(owner, repo, possibleBranch)
       existingIndex = await getRepositoryIndex(repositoryId)
       if (existingIndex) {
-        resolvedBranch = await resolveRepositoryBranch(owner, repo, accessToken, existingIndex.branch)
+        resolvedBranch = await resolveRepositoryBranch(owner, repo, existingIndex.branch)
         break
       }
     }
     // Si no existe ningún índice, resolver con branch por defecto
     if (!existingIndex) {
-      resolvedBranch = await resolveRepositoryBranch(owner, repo, accessToken)
+      resolvedBranch = await resolveRepositoryBranch(owner, repo)
     }
   }
 
@@ -82,11 +80,11 @@ export async function indexRepository(
   }
 
   // Obtener metadatos del repositorio (pueden haber cambiado)
-  const repoMetadata = await getRepositoryMetadata(owner, repo, accessToken)
+  const repoMetadata = await getRepositoryMetadata(owner, repo)
   const defaultBranch = repoMetadata.default_branch
 
   // Obtener árbol completo
-  const tree = await getRepositoryTree(owner, repo, actualBranch, accessToken)
+  const tree = await getRepositoryTree(owner, repo, actualBranch)
 
   // Filtrar solo archivos (blobs), excluir directorios
   const files = tree.tree.filter((item) => item.type === "blob")
@@ -146,7 +144,7 @@ export async function indexRepository(
     keyFilePaths,
     async (path) => {
       try {
-        const blob = await getFileContent(owner, repo, path, actualBranch, accessToken)
+        const blob = await getFileContent(owner, repo, path, actualBranch)
         const content =
           blob.encoding === "base64" ? Buffer.from(blob.content, "base64").toString("utf-8") : blob.content
         const fileName = path.split("/").pop() || ""
@@ -344,4 +342,3 @@ function calculateSummary(files: IndexedFile[]) {
     },
   }
 }
-

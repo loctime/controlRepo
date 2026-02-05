@@ -295,8 +295,7 @@ export function RepositoryProvider({ children }: { children: React.ReactNode }) 
 
         const token = await currentUser.getIdToken()
 
-        // Obtener accessToken de GitHub si está disponible
-        // Por ahora, el backend lo obtiene automáticamente desde Firestore
+        // El backend maneja el acceso público y el fallback con token de entorno
         const requestBody: IndexRepositoryRequest = {
           repositoryId: repoId,
           force,

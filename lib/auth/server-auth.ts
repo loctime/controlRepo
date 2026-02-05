@@ -259,7 +259,7 @@ export function initializeFirebaseAdmin(): { auth: Auth; db: Firestore } {
     console.log("[AUTH] ✅ Auth y Firestore obtenidos exitosamente")
     
     // Nota: La verificación de credenciales se hará cuando se use Firestore por primera vez
-    // Si hay un problema de credenciales, se detectará en getGitHubAccessToken u otras operaciones
+    // Si hay un problema de credenciales, se detectará en operaciones posteriores
     // y se manejará apropiadamente
     
     return { auth, db }
@@ -299,104 +299,6 @@ export async function verifyFirebaseIdToken(idToken: string): Promise<string> {
 }
 
 /**
- * Obtiene el access_token de GitHub del usuario desde Firestore
- * @param uid UID del usuario
- * @returns access_token de GitHub o null si no existe
- */
-export async function getGitHubAccessToken(uid: string): Promise<string | null> {
-  const { db } = initializeFirebaseAdmin()
-
-  try {
-    // Buscar en la estructura correcta: /apps/controlrepo/{uid}/githubIntegration
-    const docPath = `apps/controlrepo/${uid}/githubIntegration`
-    console.log(`[AUTH] Buscando GitHub integration en '${docPath}' para usuario ${uid}`)
-    const docRef = db.doc(docPath)
-    const doc = await docRef.get()
-
-    if (!doc.exists) {
-      console.log(`[AUTH] GitHub integration no encontrada para usuario ${uid}`)
-      console.log(JSON.stringify({
-        level: "info",
-        service: "controlfile-backend",
-        environment: process.env.NODE_ENV || "production",
-        timestamp: new Date().toISOString(),
-        component: "getGitHubAccessToken",
-        userId: uid,
-        documentPath: docPath,
-        documentExists: false,
-        message: "GitHub integration no encontrada",
-      }))
-      return null
-    }
-
-    const data = doc.data()
-    console.log(`[AUTH] Documento encontrado. Campos disponibles: ${Object.keys(data || {}).join(", ")}`)
-    const token = data?.access_token || null
-    
-    if (!token) {
-      console.log(`[AUTH] access_token no encontrado en documento de GitHub para usuario ${uid}`)
-      console.log(JSON.stringify({
-        level: "warn",
-        service: "controlfile-backend",
-        environment: process.env.NODE_ENV || "production",
-        timestamp: new Date().toISOString(),
-        component: "getGitHubAccessToken",
-        userId: uid,
-        documentExists: true,
-        hasAccessTokenField: "access_token" in (data || {}),
-        dataKeys: Object.keys(data || {}),
-        message: "access_token no encontrado en documento",
-      }))
-    } else {
-      console.log(`[AUTH] access_token obtenido para usuario ${uid} (longitud: ${token.length})`)
-      console.log(JSON.stringify({
-        level: "info",
-        service: "controlfile-backend",
-        environment: process.env.NODE_ENV || "production",
-        timestamp: new Date().toISOString(),
-        component: "getGitHubAccessToken",
-        userId: uid,
-        tokenLength: token.length,
-        message: "access_token obtenido exitosamente",
-      }))
-    }
-    
-    return token
-  } catch (error) {
-    // Log detallado del error
-    console.error(`[AUTH] Error al obtener access_token para usuario ${uid}:`, error)
-    console.error(JSON.stringify({
-      level: "error",
-      service: "controlfile-backend",
-      environment: process.env.NODE_ENV || "production",
-      timestamp: new Date().toISOString(),
-      component: "getGitHubAccessToken",
-      errorType: "FIRESTORE_ERROR",
-      errorMessage: error instanceof Error ? error.message : "Error desconocido",
-      userId: uid,
-    }))
-    
-    // En lugar de lanzar el error, devolver null para que el endpoint pueda manejar
-    // el caso de "GitHub no conectado" con un 400 en lugar de un 500
-    // Solo lanzar si es un error crítico de autenticación
-    if (error instanceof Error) {
-      const errorMessage = error.message.toLowerCase()
-      // Si es un error de permisos o autenticación de Firestore, sí lanzar
-      if (errorMessage.includes("permission") || 
-          errorMessage.includes("unauthorized") ||
-          errorMessage.includes("unauthenticated")) {
-        throw error
-      }
-    }
-    
-    // Para otros errores (red, timeout, etc.), devolver null
-    // El endpoint manejará esto como "GitHub no conectado"
-    console.warn(`[AUTH] Devolviendo null debido a error no crítico al obtener access_token para usuario ${uid}`)
-    return null
-  }
-}
-
-/**
  * Extrae y verifica el token Bearer del header Authorization
  * @param request Request de Next.js
  * @returns UID del usuario autenticado
@@ -418,4 +320,3 @@ export async function getAuthenticatedUserId(
   const idToken = authHeader.substring(7) // Remover "Bearer "
   return await verifyFirebaseIdToken(idToken)
 }
-

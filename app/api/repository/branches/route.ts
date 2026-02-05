@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getAllBranches } from "@/lib/github/client"
-import { getAuthenticatedUserId, getGitHubAccessToken } from "@/lib/auth/server-auth"
+import { getAuthenticatedUserId } from "@/lib/auth/server-auth"
 
 /**
  * GET /api/repository/branches
@@ -20,15 +20,6 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Obtener access_token de GitHub del usuario desde Firestore
-    const accessToken = await getGitHubAccessToken(uid)
-    if (!accessToken) {
-      return NextResponse.json(
-        { error: "GitHub no conectado. Por favor, conecta tu cuenta de GitHub primero." },
-        { status: 400 }
-      )
-    }
-
     const searchParams = request.nextUrl.searchParams
     const owner = searchParams.get("owner")
     const repo = searchParams.get("repo")
@@ -42,7 +33,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Obtener todas las ramas
-    const branches = await getAllBranches(owner, repo, accessToken)
+    const branches = await getAllBranches(owner, repo)
 
     // Retornar solo los nombres de las ramas
     const branchNames = branches.map((branch) => branch.name)
@@ -57,4 +48,3 @@ export async function GET(request: NextRequest) {
     )
   }
 }
-
